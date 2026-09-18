@@ -22,23 +22,36 @@ OUT=/camp/lab/windingm/home/shared/sleap/model-tests/predictions
 
 mkdir -p "$OUT"
 
-for MODEL in \
-    centroid_baseline \
-    centroid_fullres_sigma5 \
-    centroid_halfres_sigma2p5 \
-    centroid_halfres_body \
-    centroid_fullres_body
-do
-    echo "======================================"
-    echo "Running $MODEL"
-    echo "======================================"
+# No arguments = run all centroid models
+if [ "$#" -eq 0 ]; then
+    PATTERNS=("centroid_*")
+else
+    PATTERNS=("$@")
+fi
 
-    sleap predict \
-        -i "$VIDEO" \
-        -m "$MODELS/$MODEL" \
-        -o "$OUT/$MODEL.slp" \
-        --peak_threshold 0.2 \
-        --batch_size 8
+for PATTERN in "${PATTERNS[@]}"; do
+    for MODEL_PATH in "$MODELS"/$PATTERN; do
+        [ -d "$MODEL_PATH" ] || continue
+
+        MODEL=$(basename "$MODEL_PATH")
+        OUTPUT="$OUT/$MODEL.slp"
+
+        if [ -f "$OUTPUT" ]; then
+            echo "Skipping $MODEL - prediction already exists"
+            continue
+        fi
+
+        echo "======================================"
+        echo "Running $MODEL"
+        echo "======================================"
+
+        sleap predict \
+            -i "$VIDEO" \
+            -m "$MODEL_PATH" \
+            -o "$OUTPUT" \
+            --peak_threshold 0.2 \
+            --batch_size 8
+    done
 done
 
 echo "All predictions complete."
