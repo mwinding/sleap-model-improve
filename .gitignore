@@ -1,0 +1,4 @@
+data
+outputs/
+models/sam2/
+__pycache__
