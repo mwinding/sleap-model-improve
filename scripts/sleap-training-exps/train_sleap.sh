@@ -19,9 +19,40 @@ ml Anaconda3/2024.10
 source /camp/apps/eb/software/Anaconda/conda.env.sh
 conda activate /camp/lab/windingm/home/shared/conda-envs/sleap165
 
-cd "$SLURM_SUBMIT_DIR"
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd -- "$SCRIPT_DIR/../.." && pwd)
+cd "$REPO_ROOT"
 
-CONFIG=$1
-shift
+if [[ "${1:-}" == "--synthetic" ]]; then
+	shift
+	if [[ "${1:-}" != "--run-name" || -z "${2:-}" ]]; then
+		echo "Usage: sbatch train_sleap.sh --synthetic --run-name NAME PATH [PATH ...]" >&2
+		exit 2
+	fi
+	RUN_NAME=$2
+	shift 2
+	if [[ "$#" -eq 0 ]]; then
+		echo "At least one synthetic SLP is required" >&2
+		exit 2
+	fi
+	CONFIG=$(mktemp "${TMPDIR:-/tmp}/centroid_synthetic_XXXXXX.yaml")
+	trap 'rm -f "$CONFIG"' EXIT
+	python "$SCRIPT_DIR/make_centroid_config.py" \
+		--output "$CONFIG" \
+		--run-name "$RUN_NAME" \
+		--synthetic "$@"
+	set --
+else
+	CONFIG=${1:?"Usage: sbatch train_sleap.sh path/to/config.yaml [overrides...]"}
+	shift
+	if [[ ! -f "$CONFIG" ]]; then
+		CONFIG="$REPO_ROOT/$CONFIG"
+	fi
+	if [[ ! -f "$CONFIG" ]]; then
+		echo "Config file not found: $CONFIG" >&2
+		exit 2
+	fi
+fi
 
-sleap train "$CONFIG" "$@"
+echo "Training with config: $CONFIG"
+sleap train --config "$CONFIG" "$@"
