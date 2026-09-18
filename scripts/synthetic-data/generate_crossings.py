@@ -118,7 +118,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--library", type=Path, default=Path("outputs/donor_library_sam2"),
                         help="Donor library containing a completed 0/1 donor_review.csv.")
-    parser.add_argument("--output", type=Path, default=Path("outputs/synthetic_crossings"))
+    parser.add_argument("--output", type=Path, default=Path("outputs/synthetic_data"))
     parser.add_argument("--count", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=165)
     parser.add_argument("--qc-tiles", type=int, default=64)
