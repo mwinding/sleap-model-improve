@@ -160,3 +160,18 @@ python -m unittest discover -s scripts/model-assessment -v
 Tests cover one-to-one matching in ambiguous piles, invalid edges, duplicate
 predictions, tolerance boundaries, empty detections, repeat accounting and omitted
 prediction frames. End-to-end validation uses the actual mounted prediction files.
+
+## Held-out retrains
+
+The `_holdout` models (see `scripts/sleap-training-exps/README.md`) are assessed into a
+separate directory so the original results are kept:
+
+```bash
+python scripts/model-assessment/assess_centroids.py --models centroid_*_holdout --output outputs/model_assessment/holdout
+python scripts/model-assessment/plot_assessment.py --assessment outputs/model_assessment/holdout --suffix _holdout
+python scripts/model-assessment/plot_holdout_comparison.py
+```
+
+`--suffix` maps the plotted groups onto the retrained model names. `plot_holdout_comparison.py`
+draws each model's original score (benchmark frames in training) next to its held-out retrain
+and writes the differences to `holdout_vs_original.csv`.

@@ -103,13 +103,18 @@ def annotate(image, rows, recovered):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--assessment',type=Path,default=ROOT/'outputs/model_assessment')
-    parser.add_argument('--baseline',default='centroid_fullres_body')
-    parser.add_argument('--candidate',default='centroid_body_synth_fullframe_darkoverlap_v1')
+    parser.add_argument('--baseline',default=None,help='Default: centroid_fullres_body plus --suffix')
+    parser.add_argument('--candidate',default=None,help='Default: centroid_body_synth_fullframe_darkoverlap_v1 plus --suffix')
+    parser.add_argument('--suffix',default='',help='Model-name suffix (e.g. _holdout) applied to the plotted groups')
     parser.add_argument('--repeat',type=int,default=0,help='Zero-based repeat for qualitative images; metrics always average repeats')
     parser.add_argument('--zoom-orders',type=int,nargs='+',default=[2,3,5])
     parser.add_argument('--zoom-size',type=int,default=480)
     parser.add_argument('--plots-only',action='store_true',help='Restyle metrics without regenerating image overlays')
     args=parser.parse_args()
+    args.baseline=args.baseline or 'centroid_fullres_body'+args.suffix
+    args.candidate=args.candidate or 'centroid_body_synth_fullframe_darkoverlap_v1'+args.suffix
+    groups={name:[(model+args.suffix,label) for model,label in group] for name,group in GROUPS.items()}
+    reference_model='centroid_fullres_body'+args.suffix
     prism_style()
     folder=args.assessment
     metadata=json.loads((folder/'assessment.json').read_text())
@@ -118,7 +123,7 @@ def main():
     out=folder/'plots';out.mkdir(exist_ok=True)
     summary=read_csv(folder/'summary.csv')
     lookup={(r['model'],r['subset']):r for r in summary}
-    for name,group in GROUPS.items():
+    for name,group in groups.items():
         group=[(m,label) for m,label in group if (m,'all') in lookup]
         if not group: continue
         x=np.arange(len(group))
@@ -156,7 +161,7 @@ def main():
         'cfull_parameter_tweaks': '2  Parameter tweaks',
         'synthetic_training_comparison': '3  Synthetic training',
     }
-    narrative_labels = {
+    narrative_labels = {model+args.suffix:label for model,label in {
         'centroid_fullres_body': 'Full res + body',
         'centroid_fullres_body_sigma2': 'σ = 2',
         'centroid_fullres_body_sigma3p5': 'σ = 3.5',
@@ -165,10 +170,10 @@ def main():
         'centroid_test_with_synthetic': 'Two-animal crops',
         'centroid_body_synth_hard_crossings_v1': 'Hard-crossing scenes',
         'centroid_body_synth_fullframe_darkoverlap_v1': 'Full-frame dark overlap',
-    }
+    }.items()}
     narrative,headers,seen=[],[],set()
     position=0.0
-    for name,group in GROUPS.items():
+    for name,group in groups.items():
         members=[(model,label) for model,label in group if (model,'all') in lookup and model not in seen]
         if not members:
             continue
@@ -210,7 +215,7 @@ def main():
                     bbox={'facecolor':'white','edgecolor':'none','pad':2},zorder=5)
         ax.spines['left'].set_bounds(position-.3, y[0]-.34)
         for tick,row in zip(ax.get_yticklabels(),narrative):
-            if row['model']=='centroid_fullres_body':
+            if row['model']==reference_model:
                 tick.set_fontweight('bold')
 
     height=max(7,position*.5)
