@@ -19,8 +19,6 @@ import sleap_io as sio
 from assess_centroids import ROOT
 from plot_assessment import format_percent_axis, gradient_colors, prism_style, save_plot
 
-MARKERS = ['o', 's', 'D', '^', 'v']
-
 
 def nearest_same_node(frame, node):
     points = np.array([inst.numpy()[node] for inst in frame.instances])
@@ -54,15 +52,14 @@ def main():
     rows = []
     for ax, (title, frames) in zip(axes, subsets.items()):
         n_larvae = sum(len(f.instances) for f in frames)
-        for k, (node, color, marker) in enumerate(zip(nodes, colors, MARKERS)):
+        for k, (node, color) in enumerate(zip(nodes, colors)):
             nearest = np.concatenate([nearest_same_node(f, k) for f in frames])
             curve = [100 * (nearest <= d).mean() for d in distances]
-            ax.plot(distances, curve, color=color, marker=marker, markevery=5, markersize=6,
-                    markeredgecolor='white', markeredgewidth=0.8, label=node, zorder=3)
+            ax.plot(distances, curve, color=color, label=node, zorder=3)
             rows.extend({'subset': title, 'anchor': node, 'distance_px': int(d), 'percent_within': round(c, 2)}
                         for d, c in zip(distances, curve))
         ax.axvline(args.fusion_distance, color='0.35', linestyle=':', linewidth=1.6, zorder=2)
-        ax.text(args.fusion_distance + 0.8, 79, f'peaks fuse\n(< ~{args.fusion_distance:g} px)', fontsize=10, color='0.3', va='top')
+        ax.text(args.fusion_distance + 0.8, 79, f'peaks fuse\n(< 2σ = {args.fusion_distance:g} px)', fontsize=10, color='0.3', va='top')
         ax.set_title(f'{title} ({n_larvae} larvae)')
         ax.set_xlabel('Distance to nearest same node of another larva (px)')
         ax.set_xlim(0, args.max_distance + 1)
