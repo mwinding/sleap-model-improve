@@ -79,7 +79,7 @@ def decode_source(handle, video_id, frame_idx):
     return image
 
 
-def load_benchmark(manifest, ground_truth, excluded):
+def load_benchmark(manifest, ground_truth, excluded, target_node='body'):
     rows = sorted(csv.DictReader(Path(manifest).open()), key=lambda r: int(r['order']))
     if [int(r['order']) for r in rows] != list(range(1, len(rows) + 1)):
         raise ValueError('Manifest orders must be consecutive, starting at 1')
@@ -98,11 +98,11 @@ def load_benchmark(manifest, ground_truth, excluded):
         for instance in frame.instances:
             if isinstance(instance, sio.PredictedInstance):
                 continue
-            # Fixed anatomical body coordinate, never a centroid fallback.
-            node = instance.skeleton.node_names.index('body')
+            # Fixed anatomical coordinate (the model's anchor part), never a centroid fallback.
+            node = instance.skeleton.node_names.index(target_node)
             point = instance.points['xy'][node]
             if not np.isfinite(point).all():
-                raise ValueError(f'Missing body coordinate in benchmark image {row["order"]}')
+                raise ValueError(f'Missing {target_node} coordinate in benchmark image {row["order"]}')
             points.append(point)
             means.append(np.nanmean(instance.numpy(), axis=0))
         row['gt_mean'] = np.asarray(means).reshape(-1, 2)
@@ -199,6 +199,8 @@ def main():
     parser.add_argument('--output', type=Path, default=ROOT/'outputs/model_assessment')
     parser.add_argument('--target', choices=['body', 'mean', 'historical'], default='body',
                         help='Fixed anatomical target, or explicit per-model legacy targets to reproduce old tables')
+    parser.add_argument('--target-node', default='body',
+                        help="Skeleton node used as the fixed target (the model's anchor part); default body")
     parser.add_argument('--threshold', type=float, default=0.2)
     parser.add_argument('--thresholds', type=float, nargs='+', default=[0.2, 0.3, 0.4, 0.5])
     parser.add_argument('--tolerance', type=float, default=15.0)
@@ -215,7 +217,7 @@ def main():
     if not paths or any(not p.is_file() for p in paths):
         parser.error('No predictions found or a requested model file is missing')
     args.output.mkdir(parents=True, exist_ok=True)
-    benchmark = load_benchmark(args.manifest, args.ground_truth, set(args.exclude_orders))
+    benchmark = load_benchmark(args.manifest, args.ground_truth, set(args.exclude_orders), args.target_node)
     mapping = verify_video(args.comparison_video, args.ground_truth, benchmark, args.repeats)
     write_csv(args.output/'frame_mapping.csv', mapping)
     print(f'Verified {len(mapping)} comparison frames against {len(benchmark)} source images.', flush=True)
@@ -288,7 +290,7 @@ def main():
     for name, rows in [('summary',summary),('threshold_sweep',sweep),('per_frame',per_frame),
                        ('per_image',per_image),('matches',details)]:
         write_csv(args.output/f'{name}.csv',rows)
-    metadata = {'target_protocol':args.target, 'ground_truth':str(args.ground_truth.resolve()), 'manifest':str(args.manifest.resolve()),
+    metadata = {'target_protocol':args.target, 'target_node':args.target_node, 'ground_truth':str(args.ground_truth.resolve()), 'manifest':str(args.manifest.resolve()),
                 'ground_truth_sha256':hashlib.sha256(args.ground_truth.read_bytes()).hexdigest(),
                 'manifest_sha256':hashlib.sha256(args.manifest.read_bytes()).hexdigest(),
                 'comparison_video':str(args.comparison_video.resolve()),

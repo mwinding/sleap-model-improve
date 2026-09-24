@@ -61,3 +61,16 @@ python scripts/model-assessment/assess_centroids.py --output outputs/model_asses
 Once the training recipe is chosen, retrain it on all 222 frames (`configs/centroid.yaml`,
 synthetic data with `--no-holdout`). That final model has seen the benchmark frames, so
 report the held-out results, not its benchmark score.
+
+## Peak-separation experiments
+
+The miss analysis (`scripts/model-assessment/analyse_misses.py`) showed that essentially every
+missed larva overlaps another one, and that the model produces a single confidence-map peak
+for two body points closer than ~10 px (σ 2.5 × output stride 2 = 5 px in the image). Two
+single-change configs off the full-frame-synthetic holdout recipe target this:
+
+- `configs/holdout/centroid_synth_fullframe_stride1_sigma2_holdout.yaml`: output stride 1, σ 2
+  (2 px peaks instead of 5 px).
+- `configs/holdout/centroid_synth_fullframe_mouthhooks_holdout.yaml`: mouthhooks anchor, the
+  single node least often fused with a neighbour in the benchmark frames. Assess it with
+  `assess_centroids.py --target-node mouthhooks`.
