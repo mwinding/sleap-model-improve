@@ -37,7 +37,7 @@ trainer_config:
   seed: 42
   save_ckpt: true
   ckpt_dir: /camp/lab/windingm/home/shared/models/sideview/experiments
-  run_name: centroid_fullres_body_holdout
+  run_name: centroid_holdout_test
 
   early_stopping:
     patience: 20

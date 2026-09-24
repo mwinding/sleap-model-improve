@@ -23,35 +23,39 @@ frames as backgrounds and as donor sources (`--no-holdout` disables this).
 Each label file is split into train/validation separately with `trainer_config.seed` (42),
 so the real-label validation split is identical with or without synthetic data.
 
-## Held-out comparison run
+## Held-out reruns
 
-Copy the inputs to CAMP (from the Mac, with the share mounted):
+`configs/holdout/` has one config per model trained before the holdout. Each is that
+model's saved `initial_config.yaml` with only two changes: the real labels point at
+`combined_ground_truth_train.pkg.slp` (and synthetic labels at their regenerated
+`synthetic_data_holdout/` versions), and `run_name` gains a `_holdout` suffix, so the
+original models and predictions are kept for comparison.
+
+The regenerated synthetic sets use the original settings (seed 165):
 
 ```bash
-COMBINED=/Volumes/lab-windingm/home/shared/sleap/groundtruth/combined
-cp data/combined_ground_truth_train.pkg.slp data/holdout_frames.json "$COMBINED/"
-mkdir -p "$COMBINED/synthetic_data_holdout"
-cp outputs/synthetic_data_holdout/crossings_full-frame.slp "$COMBINED/synthetic_data_holdout/"
+O=outputs/synthetic_data_holdout
+python scripts/synthetic-data/generate_full_frame_crossings.py --source data/combined_ground_truth_train.pkg.slp --output $O
+python scripts/synthetic-data/generate_crossings.py --count 1000 --mode darken_overlap --output $O/crops
+python scripts/synthetic-data/filter_extra_animals.py --crossings $O/crops
+python scripts/synthetic-data/generate_hard_crossings.py --output $O
 ```
 
-Train on CAMP, from the repository root:
+These, `data/combined_ground_truth_train.pkg.slp` and `data/holdout_frames.json` are copied
+to `/camp/lab/windingm/home/shared/sleap/groundtruth/combined/` (synthetic sets under
+`synthetic_data_holdout/`, crop crossings under `synthetic_data_holdout/crops/`).
+
+Train on CAMP, from the repository root, one config per job:
 
 ```bash
-sbatch scripts/sleap-training-exps/train_sleap.sh scripts/sleap-training-exps/configs/centroid_holdout.yaml
-sbatch scripts/sleap-training-exps/train_sleap.sh --synthetic \
-    --run-name centroid_body_synth_fullframe_darkoverlap_holdout \
-    /camp/lab/windingm/home/shared/sleap/groundtruth/combined/synthetic_data_holdout/crossings_full-frame.slp
+sbatch scripts/sleap-training-exps/train_sleap.sh scripts/sleap-training-exps/configs/holdout/centroid_fullres_body_holdout.yaml
 ```
 
 Predict, then assess (assessment runs on the Mac against the mounted predictions):
 
 ```bash
 sbatch scripts/sleap-training-exps/predict_centroids.sh 'centroid_*_holdout'
-python scripts/model-assessment/assess_centroids.py \
-    --models centroid_fullres_body_holdout centroid_body_synth_fullframe_darkoverlap_holdout \
-    --output outputs/model_assessment/holdout
-python scripts/model-assessment/plot_assessment.py --assessment outputs/model_assessment/holdout \
-    --baseline centroid_fullres_body_holdout --candidate centroid_body_synth_fullframe_darkoverlap_holdout
+python scripts/model-assessment/assess_centroids.py --output outputs/model_assessment/holdout
 ```
 
 Once the training recipe is chosen, retrain it on all 222 frames (`configs/centroid.yaml`,
