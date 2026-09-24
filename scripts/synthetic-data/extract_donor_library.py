@@ -142,11 +142,21 @@ def load_candidates(slp_path: Path, crop_size: int) -> tuple[list[dict], list[st
     return candidates, node_names
 
 
+def load_holdout(path: Path | None) -> set[tuple[int, int]]:
+    """Return (video_id, frame_idx) pairs that must not feed synthetic data."""
+    if path is None:
+        return set()
+    frames = json.loads(path.read_text(encoding="utf-8"))["frames"]
+    return {(int(row["video_id"]), int(row["frame_idx"])) for row in frames}
+
+
 def select_candidates(candidates: list[dict], crop_size: int, min_body: float, max_body: float,
-                      isolation_ratio: float) -> list[dict]:
+                      isolation_ratio: float, holdout: set[tuple[int, int]]) -> list[dict]:
     selected = []
     half = crop_size / 2
     for candidate in candidates:
+        if (candidate["video_id"], candidate["frame_idx"]) in holdout:
+            continue
         x, y = candidate["center"]
         length = candidate["body_length"]
         if not (min_body <= length <= max_body):
@@ -170,6 +180,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--isolation-ratio", type=float, default=1.5)
     parser.add_argument("--max-donors", type=int, default=None)
     parser.add_argument("--qc-tiles", type=int, default=64)
+    parser.add_argument("--holdout", type=Path, default=Path("data/holdout_frames.json"),
+                        help="Held-out frames from make_holdout_split.py; no donors are taken from them.")
+    parser.add_argument("--no-holdout", action="store_true", help="Take donors from every source frame.")
     return parser
 
 
@@ -185,6 +198,7 @@ def main() -> None:
         args.min_body_length,
         args.max_body_length,
         args.isolation_ratio,
+        load_holdout(None if args.no_holdout else args.holdout),
     )
     if args.max_donors is not None:
         selected = selected[:args.max_donors]

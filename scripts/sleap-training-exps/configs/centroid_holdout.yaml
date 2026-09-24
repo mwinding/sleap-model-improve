@@ -1,0 +1,44 @@
+data_config:
+  train_labels_path:
+    - /camp/lab/windingm/home/shared/sleap/groundtruth/combined/combined_ground_truth_train.pkg.slp
+
+  validation_fraction: 0.1
+  user_instances_only: true
+
+  preprocessing:
+    ensure_grayscale: true
+    scale: 1.0
+
+
+model_config:
+  backbone_config:
+    unet:
+      in_channels: 1
+      filters: 16
+      max_stride: 16
+      output_stride: 2
+
+  head_configs:
+    centroid:
+      confmaps:
+        anchor_part: body
+        sigma: 2.5
+        output_stride: 2
+
+
+trainer_config:
+  train_data_loader:
+    batch_size: 2
+
+  val_data_loader:
+    batch_size: 2
+
+  max_epochs: 200
+  seed: 42
+  save_ckpt: true
+  ckpt_dir: /camp/lab/windingm/home/shared/models/sideview/experiments
+  run_name: centroid_fullres_body_holdout
+
+  early_stopping:
+    patience: 20
+    stop_training_on_plateau: true

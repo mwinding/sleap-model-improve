@@ -114,6 +114,14 @@ def approved_donors(library: Path, donors: list[dict]) -> list[dict]:
     return [donor for donor in donors if statuses[donor["donor_id"]] == "1"]
 
 
+def load_holdout(path: Path | None) -> set[tuple[int, int]]:
+    """Return (video_id, frame_idx) pairs that must not feed synthetic data."""
+    if path is None:
+        return set()
+    frames = json.loads(path.read_text(encoding="utf-8"))["frames"]
+    return {(int(row["video_id"]), int(row["frame_idx"])) for row in frames}
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--library", type=Path, default=Path("outputs/donor_library_sam2"),
@@ -127,14 +135,21 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Donor opacity/strength for alpha and density modes.")
     parser.add_argument("--no-appearance-matching", action="store_true",
                         help="Disable compatible pairing and contrast correction for comparison.")
+    parser.add_argument("--holdout", type=Path, default=Path("data/holdout_frames.json"),
+                        help="Held-out frames from make_holdout_split.py; their donors are skipped.")
+    parser.add_argument("--no-holdout", action="store_true", help="Use donors from every source frame.")
     return parser
 
 
 def main() -> None:
     args = build_parser().parse_args()
+    holdout = load_holdout(None if args.no_holdout else args.holdout)
     metadata = json.loads((args.library / "donors.json").read_text(encoding="utf-8"))
     donors = approved_donors(args.library, metadata["donors"])
-    print(f"Using {len(donors)}/{len(metadata['donors'])} approved donors from {args.library}")
+    approved_count = len(donors)
+    donors = [donor for donor in donors if (donor["source_video"], donor["source_frame"]) not in holdout]
+    print(f"Using {len(donors)}/{len(metadata['donors'])} approved donors from {args.library} "
+          f"({approved_count - len(donors)} skipped from held-out frames)")
     crop_size = int(metadata["crop_size"])
     if len(donors) < 2:
         raise RuntimeError("The donor library must contain at least two approved donors")
@@ -249,6 +264,7 @@ def main() -> None:
         json.dump({"nodes": metadata["nodes"], "crop_size": crop_size, "seed": args.seed,
                "compositing_mode": args.mode, "compositing_alpha": args.alpha,
                "appearance_matching": not args.no_appearance_matching,
+               "holdout": None if args.no_holdout else str(args.holdout),
                "crossings": records}, handle, indent=2)
 
     with (args.output / "appearance_review.csv").open("w", newline="", encoding="utf-8") as handle:

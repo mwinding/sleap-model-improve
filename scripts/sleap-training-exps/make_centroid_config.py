@@ -11,7 +11,8 @@ import yaml
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base", type=Path, default=Path("scripts/sleap-training-exps/configs/centroid.yaml"))
+    parser.add_argument("--base", type=Path, default=Path("scripts/sleap-training-exps/configs/centroid_holdout.yaml"),
+                        help="Base config; the default trains on real labels without held-out benchmark frames.")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--run-name", required=True)
     parser.add_argument("--synthetic", type=Path, nargs="+", required=True,

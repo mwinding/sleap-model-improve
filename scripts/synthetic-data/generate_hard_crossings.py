@@ -41,11 +41,20 @@ def median_background(h5_file, video_id: int) -> np.ndarray:
     return np.median(np.stack(frames), axis=0).astype(np.uint8)
 
 
-def approved_donors(library: Path) -> list[dict]:
+def load_holdout(path: Path | None) -> set[tuple[int, int]]:
+    """Return (video_id, frame_idx) pairs that must not feed synthetic data."""
+    if path is None:
+        return set()
+    frames = json.loads(path.read_text(encoding="utf-8"))["frames"]
+    return {(int(row["video_id"]), int(row["frame_idx"])) for row in frames}
+
+
+def approved_donors(library: Path, holdout: set[tuple[int, int]]) -> list[dict]:
     metadata = json.loads((library / "donors.json").read_text())
     with (library / "donor_review.csv").open(newline="", encoding="utf-8-sig") as handle:
         statuses = {int(row["donor_id"]): row["status"].strip() for row in csv.DictReader(handle)}
-    donors = [donor for donor in metadata["donors"] if statuses.get(donor["donor_id"]) == "1"]
+    donors = [donor for donor in metadata["donors"] if statuses.get(donor["donor_id"]) == "1"
+              and (donor["source_video"], donor["source_frame"]) not in holdout]
     if len(donors) < 10:
         raise ValueError("At least 10 approved donors are required")
     return donors
@@ -133,13 +142,17 @@ def build_parser():
     parser.add_argument("--max-added-donors", type=int, default=10,
                         help="Maximum one-donor crossings to add per frame.")
     parser.add_argument("--seed", type=int, default=165)
+    parser.add_argument("--holdout", type=Path, default=Path("data/holdout_frames.json"),
+                        help="Held-out frames from make_holdout_split.py; skipped as backgrounds and donors.")
+    parser.add_argument("--no-holdout", action="store_true", help="Use every source frame.")
     return parser
 
 
 def main():
     args = build_parser().parse_args()
+    holdout = load_holdout(None if args.no_holdout else args.holdout)
     source = sleap_io.load_slp(str(args.source), open_videos=False)
-    donors = approved_donors(args.library)
+    donors = approved_donors(args.library, holdout)
     skeleton = source.skeletons[0]
     donor_images = [cv2.imread(str(args.library / donor["image"])) for donor in donors]
     donor_masks = [cv2.imread(str(args.library / donor["mask"]), cv2.IMREAD_GRAYSCALE) for donor in donors]
@@ -147,6 +160,8 @@ def main():
     if args.max_added_donors < 1:
         raise ValueError("--max-added-donors must be at least 1")
     for labeled in source:
+        if (source.videos.index(labeled.video), int(labeled.frame_idx)) in holdout:
+            continue
         selected = separated_subset(labeled.instances, args.min_separation, args.max_added_donors)
         if len(selected) >= min(5, args.max_added_donors):
             candidates.append(labeled)
@@ -199,7 +214,8 @@ def main():
         "source": str(args.source), "count": len(records),
         "min_separation": args.min_separation,
         "max_added_donors": args.max_added_donors,
-        "background_instances_preserved": True, "records": records,
+        "background_instances_preserved": True,
+        "holdout": None if args.no_holdout else str(args.holdout), "records": records,
     }, indent=2))
     print(f"Generated {len(records)} hard crossing frames from {len(candidates)} eligible source frames")
 

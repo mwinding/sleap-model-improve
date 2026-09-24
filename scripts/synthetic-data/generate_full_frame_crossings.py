@@ -95,14 +95,23 @@ def match_appearance(image: np.ndarray, donor_mask: np.ndarray,
     return np.rint(corrected).clip(0, 255).astype(np.uint8)
 
 
-def approved_donors(library: Path) -> list[dict]:
+def load_holdout(path: Path | None) -> set[tuple[int, int]]:
+    """Return (video_id, frame_idx) pairs that must not feed synthetic data."""
+    if path is None:
+        return set()
+    frames = json.loads(path.read_text(encoding="utf-8"))["frames"]
+    return {(int(row["video_id"]), int(row["frame_idx"])) for row in frames}
+
+
+def approved_donors(library: Path, holdout: set[tuple[int, int]]) -> list[dict]:
     metadata = json.loads((library / "donors.json").read_text(encoding="utf-8"))
     donors = metadata["donors"]
     statuses = {}
     with (library / "donor_review.csv").open(newline="", encoding="utf-8-sig") as handle:
         for row in csv.DictReader(handle):
             statuses[int(row["donor_id"])] = row["status"].strip()
-    approved = [donor for donor in donors if statuses.get(donor["donor_id"]) == "1"]
+    approved = [donor for donor in donors if statuses.get(donor["donor_id"]) == "1"
+                and (donor["source_video"], donor["source_frame"]) not in holdout]
     if len(approved) < 2:
         raise ValueError("At least two approved donors are required")
     return approved
@@ -123,6 +132,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Standard deviation in degrees for aligned placements.")
     parser.add_argument("--seed", type=int, default=165)
     parser.add_argument("--max-attempts", type=int, default=30)
+    parser.add_argument("--holdout", type=Path, default=Path("data/holdout_frames.json"),
+                        help="Held-out frames from make_holdout_split.py; skipped as backgrounds and donors.")
+    parser.add_argument("--no-holdout", action="store_true", help="Use every source frame.")
     return parser
 
 
@@ -134,8 +146,9 @@ def main() -> None:
         raise ValueError("--two-crossing-probability must be between 0 and 1")
     if not 0 <= args.aligned_probability <= 1:
         raise ValueError("--aligned-probability must be between 0 and 1")
+    holdout = load_holdout(None if args.no_holdout else args.holdout)
     source = sleap_io.load_slp(str(args.source), open_videos=False)
-    donors = approved_donors(args.library)
+    donors = approved_donors(args.library, holdout)
     source_skeleton = source.skeletons[0]
     donor_skeleton = sleap_io.load_slp(str(args.library / "donors.slp"), open_videos=False).skeletons[0]
     if [node.name for node in source_skeleton.nodes] != list(NODE_ORDER):
@@ -149,7 +162,9 @@ def main() -> None:
     image_paths = []
     labeled_frames = []
 
-    source_frames = list(source)
+    source_frames = [lf for lf in source
+                     if (source.videos.index(lf.video), int(lf.frame_idx)) not in holdout]
+    print(f"Using {len(source_frames)}/{len(source)} source frames and {len(donors)} donors after holdout")
     if args.max_source_frames is not None:
         source_frames = source_frames[:args.max_source_frames]
 
@@ -259,6 +274,7 @@ def main() -> None:
         "two_crossing_probability": args.two_crossing_probability,
         "aligned_probability": args.aligned_probability,
         "alignment_jitter": args.alignment_jitter, "mode": "darken_overlap",
+        "holdout": None if args.no_holdout else str(args.holdout),
         "crossings": records,
     }, indent=2), encoding="utf-8")
     shutil.rmtree(output_images)
