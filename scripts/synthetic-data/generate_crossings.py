@@ -114,6 +114,12 @@ def approved_donors(library: Path, donors: list[dict]) -> list[dict]:
     return [donor for donor in donors if statuses[donor["donor_id"]] == "1"]
 
 
+def straightness(points: np.ndarray) -> float:
+    """Head-spiracle chord length divided by skeleton path length (1 = straight)."""
+    path = float(np.linalg.norm(np.diff(points, axis=0), axis=1).sum())
+    return float(np.linalg.norm(points[-1] - points[0])) / path if path else 0.0
+
+
 def load_holdout(path: Path | None) -> set[tuple[int, int]]:
     """Return (video_id, frame_idx) pairs that must not feed synthetic data."""
     if path is None:
@@ -138,6 +144,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--holdout", type=Path, default=Path("data/holdout_frames.json"),
                         help="Held-out frames from make_holdout_split.py; their donors are skipped.")
     parser.add_argument("--no-holdout", action="store_true", help="Use donors from every source frame.")
+    parser.add_argument("--parallel-probability", type=float, default=0.0,
+                        help="Probability of a side-by-side placement instead of a centred crossing.")
+    parser.add_argument("--parallel-jitter", type=float, default=10.0,
+                        help="Standard deviation in degrees of the donor heading around the target heading.")
+    parser.add_argument("--parallel-offset", type=float, nargs=2, default=(6.0, 25.0), metavar=("MIN", "MAX"),
+                        help="Sideways distance in px between the two body points for parallel placements.")
+    parser.add_argument("--parallel-min-straightness", type=float, default=0.9,
+                        help="Minimum head-spiracle chord / skeleton length for donors in parallel placements.")
     return parser
 
 
@@ -155,6 +169,9 @@ def main() -> None:
         raise RuntimeError("The donor library must contain at least two approved donors")
     if not 0 < args.alpha <= 1:
         raise ValueError("--alpha must be greater than 0 and no greater than 1")
+    if not 0 <= args.parallel_probability <= 1:
+        raise ValueError("--parallel-probability must be between 0 and 1")
+    body = metadata["nodes"].index("body")
 
     rng = np.random.default_rng(args.seed)
     image_dir = args.library / "images"
@@ -177,12 +194,28 @@ def main() -> None:
     np.fill_diagonal(distances, np.inf)
     skeleton = sleap_io.load_slp(str(args.library / "donors.slp"), open_videos=False).skeletons[0]
 
+    # Parallel placements use only fairly straight larvae: two bent larvae with
+    # aligned head-spiracle axes still look like a crossing.
+    straight = np.array([straightness(np.asarray(d["points_xy"])) >= args.parallel_min_straightness for d in donors])
+    if args.parallel_probability > 0 and straight.sum() < 2:
+        raise RuntimeError("Fewer than two donors meet --parallel-min-straightness")
+
     for crossing_id in range(args.count):
-        target_id, occluder_id = rng.choice(len(donors), size=2, replace=False)
+        # Only draw from the RNG when enabled, so default runs reproduce earlier sets.
+        parallel = args.parallel_probability > 0 and rng.random() < args.parallel_probability
+        if parallel:
+            target_id, occluder_id = rng.choice(np.flatnonzero(straight), size=2, replace=False)
+        else:
+            target_id, occluder_id = rng.choice(len(donors), size=2, replace=False)
         if not args.no_appearance_matching:
             compatible = np.flatnonzero(distances[target_id] <= 1.0)
+            if parallel:
+                compatible = compatible[straight[compatible]]
             if not len(compatible):
-                compatible = np.argsort(distances[target_id])[:min(5, len(donors) - 1)]
+                ranked = np.argsort(distances[target_id])
+                if parallel:
+                    ranked = ranked[straight[ranked]]
+                compatible = ranked[:min(5, len(donors) - 1)]
             occluder_id = int(rng.choice(compatible))
         target = donors[int(target_id)]
         occluder = donors[int(occluder_id)]
@@ -206,9 +239,24 @@ def main() -> None:
         target_axis = target_points[-1] - target_points[0]
         axis_length = max(float(np.linalg.norm(target_axis)), 1.0)
         axis = target_axis / axis_length
-        cross_point = target_points[0] + axis * rng.uniform(0.35, 0.7) * axis_length
-        angle = float(rng.uniform(25, 155) * rng.choice([-1, 1]))
-        scale = float(rng.uniform(0.9, 1.1))
+        if parallel:
+            # Side by side: donor heading near the target's, body points a few px apart.
+            target_angle = np.arctan2(axis[1], axis[0])
+            donor_axis = occluder_points[-1] - occluder_points[0]
+            donor_angle = np.arctan2(donor_axis[1], donor_axis[0])
+            desired_angle = target_angle + rng.normal(0, np.deg2rad(args.parallel_jitter))
+            angle = float(np.rad2deg(donor_angle - desired_angle))
+            scale = float(rng.uniform(0.9, 1.1))
+            offset = float(rng.uniform(*args.parallel_offset))
+            side = np.array([-axis[1], axis[0]]) * rng.choice([-1, 1])
+            desired_body = target_points[body] + side * offset + axis * rng.uniform(-8, 8)
+            # Place once to find where the donor's body point lands, then shift it onto the goal.
+            _, _, trial = transform_donor(occluder_image, occluder_mask, occluder_points, angle, scale, target_points[body])
+            cross_point = target_points[body] + (desired_body - trial[body])
+        else:
+            cross_point = target_points[0] + axis * rng.uniform(0.35, 0.7) * axis_length
+            angle = float(rng.uniform(25, 155) * rng.choice([-1, 1]))
+            scale = float(rng.uniform(0.9, 1.1))
         occluder_image, occluder_mask, transformed_points = transform_donor(
             occluder_image, occluder_mask, occluder_points, angle, scale, cross_point
         )
@@ -236,6 +284,8 @@ def main() -> None:
             "review_reasons": review_reasons,
             "angle": angle,
             "scale": scale,
+            "placement": "parallel" if parallel else "crossing",
+            "body_separation_px": float(np.linalg.norm(transformed_points[body] - target_points[body])),
             "points_xy": target_points.tolist(),
             "visible": target_visible.tolist(),
             "occluder_points_xy": transformed_points.tolist(),
@@ -265,6 +315,9 @@ def main() -> None:
                "compositing_mode": args.mode, "compositing_alpha": args.alpha,
                "appearance_matching": not args.no_appearance_matching,
                "holdout": None if args.no_holdout else str(args.holdout),
+               "parallel_probability": args.parallel_probability, "parallel_jitter": args.parallel_jitter,
+               "parallel_offset": list(args.parallel_offset),
+               "parallel_min_straightness": args.parallel_min_straightness,
                "crossings": records}, handle, indent=2)
 
     with (args.output / "appearance_review.csv").open("w", newline="", encoding="utf-8") as handle:

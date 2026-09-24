@@ -74,3 +74,22 @@ single-change configs off the full-frame-synthetic holdout recipe target this:
 - `configs/holdout/centroid_synth_fullframe_mouthhooks_holdout.yaml`: mouthhooks anchor, the
   single node least often fused with a neighbour in the benchmark frames. Assess it with
   `assess_centroids.py --target-node mouthhooks`.
+
+## Parallel crop crossings
+
+`generate_crossings.py --parallel-probability P` places the second larva side by side with the
+first (heading within `--parallel-jitter` degrees, body points `--parallel-offset` px apart,
+both larvae at least `--parallel-min-straightness` straight) instead of centred on its midline.
+This targets the parallel stacks along the wall that the centroid models miss. Default P = 0
+reproduces the earlier crop sets exactly.
+
+```bash
+O=outputs/synthetic_data_holdout
+python scripts/synthetic-data/generate_crossings.py --count 1400 --mode darken_overlap --parallel-probability 0.7 --output $O/crops_parallel_1k
+python scripts/synthetic-data/filter_extra_animals.py --crossings $O/crops_parallel_1k
+python scripts/synthetic-data/generate_crossings.py --count 4100 --mode darken_overlap --parallel-probability 0.7 --output $O/crops_parallel_3k
+python scripts/synthetic-data/filter_extra_animals.py --crossings $O/crops_parallel_3k
+```
+
+1,103 and 3,245 crops are kept. Same seed, so the 3k set contains the 1k set. Configs:
+`configs/holdout/centroid_synth_crops_parallel1k_holdout.yaml` and `..._parallel3k_holdout.yaml`.
