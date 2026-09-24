@@ -1,0 +1,15 @@
+order,category,video_id,source_video,frame_idx,instances,nearest_computed_centroid_px,pairs_under_15px,png_path
+1,hard_early,9,2026-02-06_12-28-26_SV36.mp4,28639,19,2.156,8,/mnt/data/comparison_video_assets/frames/01_video9_frame28639.png
+2,hard_early,9,2026-02-06_12-28-26_SV36.mp4,23376,20,3.567,6,/mnt/data/comparison_video_assets/frames/02_video9_frame23376.png
+3,hard_early,9,2026-02-06_12-28-26_SV36.mp4,7717,20,2.273,8,/mnt/data/comparison_video_assets/frames/03_video9_frame7717.png
+4,hard_early,9,2026-02-06_12-28-26_SV36.mp4,18156,18,2.507,3,/mnt/data/comparison_video_assets/frames/04_video9_frame18156.png
+5,representative,7,2024-08-29_13-47-32_SV1.mp4,113496,43,5.096,7,/mnt/data/comparison_video_assets/frames/05_video7_frame113496.png
+6,representative,6,2023-12-19_02-31-23_SV2.mp4,58953,30,3.024,3,/mnt/data/comparison_video_assets/frames/06_video6_frame58953.png
+7,representative,6,2023-12-19_02-31-23_SV2.mp4,111249,30,3.816,5,/mnt/data/comparison_video_assets/frames/07_video6_frame111249.png
+8,representative,6,2023-12-19_02-31-23_SV2.mp4,160693,30,11.499,5,/mnt/data/comparison_video_assets/frames/08_video6_frame160693.png
+9,representative,5,2023-12-16_02-33-55_SV15.mp4,103125,30,11.086,4,/mnt/data/comparison_video_assets/frames/09_video5_frame103125.png
+10,representative,5,2023-12-16_02-33-55_SV15.mp4,344368,28,8.582,4,/mnt/data/comparison_video_assets/frames/10_video5_frame344368.png
+11,representative,10,2023-12-23_01-53-32_SV19.mp4,41972,29,4.077,3,/mnt/data/comparison_video_assets/frames/11_video10_frame41972.png
+12,representative,10,2023-12-23_01-53-32_SV19.mp4,111723,26,12.123,3,/mnt/data/comparison_video_assets/frames/12_video10_frame111723.png
+13,representative,2,"2023_11_13_white_ON_1800,1100_totalpixels-1980000_DLC1.mp4",83693,25,10.081,3,/mnt/data/comparison_video_assets/frames/13_video2_frame83693.png
+14,representative,4,GH2026-01-16_12-39-46_SV35.mp4,1299,20,6.115,3,/mnt/data/comparison_video_assets/frames/14_video4_frame1299.png
