@@ -77,7 +77,7 @@ def main():
         ax.axvline(args.fusion_distance, color='0.35', linestyle=':', linewidth=1.6, zorder=2)
         ax.text(args.fusion_distance + 0.8, 79, f'peaks fuse\n(< 2σ = {args.fusion_distance:g} px)', fontsize=10, color='0.3', va='top')
         ax.set_title(f'{title} ({n_larvae} larvae)')
-        ax.set_xlabel('Distance to nearest same node of another larva (px)')
+        ax.set_xlabel('Distance to nearest neighbour (px)')
         for y_label, (_, node, color) in zip(spread_labels([e[0] for e in ends], 4.0), ends):
             ax.text(args.max_distance + 0.8, y_label, node, color=color, fontsize=12, va='center', ha='left')
         ax.set_xlim(0, args.max_distance + 8)
@@ -87,7 +87,7 @@ def main():
         ax.spines['left'].set_bounds(0, 80)
         ax.spines['bottom'].set_bounds(0, args.max_distance)
         ax.tick_params(axis='y', labelleft=True)
-        ax.set_ylabel('Larvae with a neighbour within distance (%)')
+        ax.set_ylabel('Larvae (%)')
         ax.grid(False)
     fig.tight_layout(w_pad=3)
     args.output.parent.mkdir(parents=True, exist_ok=True)
