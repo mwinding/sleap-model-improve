@@ -175,3 +175,14 @@ python scripts/model-assessment/plot_holdout_comparison.py
 `--suffix` maps the plotted groups onto the retrained model names. `plot_holdout_comparison.py`
 draws each model's original score (benchmark frames in training) next to its held-out retrain
 and writes the differences to `holdout_vs_original.csv`.
+
+## Miss analysis
+
+```bash
+python scripts/model-assessment/analyse_misses.py --models centroid_fullres_body centroid_body_synth_fullframe_darkoverlap_v1
+```
+
+Writes `<assessment>/misses/<model>_misses.csv` and a montage of crops around every missed
+larva, categorised by distance to the nearest other larva's skeleton (overlapping / close /
+frame edge / isolated), with the nearest unmatched prediction, local contrast and the number of
+repeats in which it was missed.
