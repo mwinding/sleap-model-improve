@@ -186,3 +186,7 @@ Writes `<assessment>/misses/<model>_misses.csv` and a montage of crops around ev
 larva, categorised by distance to the nearest other larva's skeleton (overlapping / close /
 frame edge / isolated), with the nearest unmatched prediction, local contrast and the number of
 repeats in which it was missed.
+
+`plot_anchor_overlap.py` plots, for each skeleton node, the percentage of larvae whose node lies
+within d px of the same node of another larva (ground truth only), on the benchmark frames and on
+all labeled frames. Nodes closer than ~2x the effective sigma fuse into one confidence-map peak.
