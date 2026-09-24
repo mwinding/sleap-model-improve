@@ -190,3 +190,10 @@ repeats in which it was missed.
 `plot_anchor_overlap.py` plots, for each skeleton node, the percentage of larvae whose node lies
 within d px of the same node of another larva (ground truth only), on the benchmark frames and on
 all labeled frames. Nodes closer than ~2x the effective sigma fuse into one confidence-map peak.
+
+## Crowded / isolated subsets
+
+`assess_centroids.py` also reports two per-animal subsets: an animal is **crowded** if its target
+point lies within `--crowded-px` (default 15) of another animal's skeleton polyline, and
+**isolated** otherwise. These are recall-only (a false positive belongs to no animal) and are
+independent of which frames were selected, unlike the frame-level hard subset.

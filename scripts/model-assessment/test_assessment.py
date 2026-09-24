@@ -6,10 +6,25 @@ from pathlib import Path
 import numpy as np
 import sleap_io as sio
 
-from assess_centroids import load_predictions, match_points, metrics
+from assess_centroids import crowded_flags, load_predictions, match_points, metrics
 
 
 class AssessmentTests(unittest.TestCase):
+    def test_crowded_flags_use_neighbour_skeleton_not_just_points(self):
+        skeleton=sio.Skeleton(['a','b','c'])
+        # Animal 0 is a long horizontal line at y=0; animal 1 is a short one 10 px
+        # above it between x=20 and 30; animal 2 is far away. Animal 1's target is
+        # 27 px from animal 0's nearest node but 10 px from its segment, so it is
+        # crowded only if segment distance is used. Animal 0's target (50,0) is
+        # 22 px from animal 1's nearest point, so it is not crowded at 15 px.
+        animals=[sio.Instance.from_numpy(np.array([[0.,0.],[50.,0.],[100.,0.]]),skeleton),
+                 sio.Instance.from_numpy(np.array([[20.,10.],[25.,10.],[30.,10.]]),skeleton),
+                 sio.Instance.from_numpy(np.array([[0.,500.],[50.,500.],[100.,500.]]),skeleton)]
+        targets=np.array([[50.,0.],[25.,10.],[50.,500.]])
+        self.assertEqual(crowded_flags(animals,targets,15).tolist(),[False,True,False])
+        self.assertEqual(crowded_flags(animals,targets,25).tolist(),[True,True,False])
+        self.assertEqual(crowded_flags(animals,targets,9).tolist(),[False,False,False])
+
     def test_global_assignment_avoids_greedy_loss(self):
         # GT 0 can take either prediction; GT 1 can only take prediction 0.
         pairs=match_points([[0,0],[3,0]],[[1,0],[-2,0]],2)
