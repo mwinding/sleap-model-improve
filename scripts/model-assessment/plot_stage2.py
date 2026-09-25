@@ -79,26 +79,28 @@ def nodes_plot(nodes, models, node_names, output):
     save_plot(fig, output)
 
 
-def draw(ax, image, gt, pred, view_centre, crop_centre, window, title, colour):
-    cx, cy = crop_centre
+CORRECT, WRONG, TRUTH = '#2ecc40', '#ff4136', 'white'
+
+
+def draw(ax, image, skeleton, view_centre, window, colour):
+    """One crop with one skeleton: a solid line along the nodes and a dot at the head end."""
     h, w = image.shape[:2]
     x0 = int(np.clip(view_centre[0] - window / 2, 0, w - window))
     y0 = int(np.clip(view_centre[1] - window / 2, 0, h - window))
     crop = image[y0:y0 + window, x0:x0 + window]
     ax.imshow(crop, cmap='gray' if crop.ndim == 2 else None, vmin=0, vmax=255)
-    ax.plot(gt[:, 0] - x0, gt[:, 1] - y0, color='#2ca02c', linewidth=2.2, zorder=3)
-    ok = np.isfinite(pred).all(axis=1)
-    ax.plot(pred[ok, 0] - x0, pred[ok, 1] - y0, color=colour, linewidth=2.2, linestyle='--', zorder=4)
-    ax.plot(pred[ok, 0] - x0, pred[ok, 1] - y0, 'o', color=colour, markersize=3.5, zorder=5)
-    ax.plot(cx - x0, cy - y0, '+', color='white', markersize=12, markeredgewidth=2, zorder=6)
+    ok = np.isfinite(skeleton).all(axis=1)
+    if ok.any():
+        ax.plot(skeleton[ok, 0] - x0, skeleton[ok, 1] - y0, color=colour, linewidth=3, solid_capstyle='round', zorder=3)
+        head = np.flatnonzero(ok)[0]
+        ax.plot(skeleton[head, 0] - x0, skeleton[head, 1] - y0, 'o', color=colour, markersize=7, zorder=4)
     ax.set_xlim(0, window); ax.set_ylim(window, 0)   # points outside the tile must not widen it
-    ax.set_title(title, fontsize=11)
     ax.set_xticks([]); ax.set_yticks([])
     for spine in ax.spines.values():
-        spine.set_visible(True); spine.set_linewidth(1)
+        spine.set_visible(False)
 
 
-def examples_plot(per_animal, models, ground_truth, predictions_dir, n_examples, seed, output, window=180):
+def examples_plot(per_animal, models, ground_truth, predictions_dir, n_examples, seed, output, window=180, max_error=5.0):
     gt_labels = sio.load_slp(str(ground_truth))
     names = gt_labels.skeletons[0].node_names
     frames = {frame_key(f): f for f in gt_labels}
@@ -108,8 +110,8 @@ def examples_plot(per_animal, models, ground_truth, predictions_dir, n_examples,
     rng = np.random.default_rng(seed)
     chosen = [first[i] for i in sorted(rng.choice(len(first), size=min(n_examples, len(first)), replace=False))]
     lookup = {(r['model'], r['video'], r['frame_idx'], r['gt_index']): r for r in per_animal}
-    colour = '#d62728'
-    fig, axes = plt.subplots(len(chosen), len(models), figsize=(3.1 * len(models), 3.2 * len(chosen)))
+    columns = ['Labelled'] + [LABELS.get(m, m) for m in models]
+    fig, axes = plt.subplots(len(chosen), len(columns), figsize=(2.6 * len(columns), 2.6 * len(chosen)))
     axes = np.atleast_2d(axes)
     for row, r in enumerate(chosen):
         key = (r['video'], int(r['frame_idx']))
@@ -118,14 +120,16 @@ def examples_plot(per_animal, models, ground_truth, predictions_dir, n_examples,
         image = image[..., 0] if image.ndim == 3 and image.shape[-1] == 1 else image
         i = int(r['gt_index'])
         gt = frame.instances[i].numpy()
-        for col, m in enumerate(models):
-            anchor = names.index(LABELS[m].lower())
+        centre = gt[names.index('body')]
+        draw(axes[row, 0], image, gt, centre, window, TRUTH)
+        for col, m in enumerate(models, start=1):
             rec = lookup[m, r['video'], r['frame_idx'], r['gt_index']]
-            status = 'wrong larva' if rec['wrong_animal'] == 'True' else (
-                f"{float(rec['mean_error_px']):.1f} px" if rec['mean_error_px'] else 'no skeleton')
-            draw(axes[row, col], image, gt, preds[m][key][i], gt[names.index('body')], gt[anchor], window,
-                 f"{LABELS[m]}: {status}", colour)
-    fig.tight_layout(h_pad=0.8, w_pad=0.4)
+            complete = all(rec[f'err_{n}'] for n in names)
+            correct = rec['wrong_animal'] != 'True' and complete and float(rec['mean_error_px']) <= max_error
+            draw(axes[row, col], image, preds[m][key][i], centre, window, CORRECT if correct else WRONG)
+    for ax, name in zip(axes[0], columns):
+        ax.set_title(name, fontsize=14, fontweight='bold', pad=8)
+    fig.tight_layout(h_pad=0.3, w_pad=0.3)
     save_plot(fig, output)
 
 
