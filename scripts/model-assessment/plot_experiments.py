@@ -71,8 +71,7 @@ def main():
     for ax, (subset, key, title, xlabel) in zip(axes, PANELS):
         values = [float(r['lookup'].get((r['model'], subset), {}).get(key) or 'nan') for r in rows]
         bars = ax.barh(y, values, 0.68, color=colors, edgecolor='black', linewidth=1.3, zorder=3)
-        labels = [f'{v:.1f}' + ('†' if subset == 'crowded' and r['node'] != 'body' else '') for v, r in zip(values, rows)]
-        ax.bar_label(bars, labels=labels, fontsize=11, padding=4)
+        ax.bar_label(bars, fmt='%.1f', fontsize=11, padding=4)
         ax.set_yticks(y, [textwrap.fill(r['label'], 22) for r in rows], fontsize=12)
         ax.tick_params(axis='y', labelleft=True)
         ax.set_ylim(position - 0.3, -0.8)
@@ -85,9 +84,6 @@ def main():
         for tick, r in zip(ax.get_yticklabels(), rows):
             if r['group'] == 'Reference':
                 tick.set_fontweight('bold')
-    fig.text(0.5, -0.01, 'All models trained without the 14 test frames (±100-frame buffer). '
-             '† Mouthhooks model: crowded subset is defined around the mouthhooks point (138 larvae, vs 155 for body).',
-             ha='center', fontsize=11, color='0.3')
     fig.tight_layout(w_pad=2.2)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     save_plot(fig, args.output)
