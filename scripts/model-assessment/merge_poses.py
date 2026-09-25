@@ -4,9 +4,21 @@
 Per frame, skeletons from all inputs are pooled and grouped greedily, most confident first:
 a skeleton joins an existing group if its mean node distance to the group is within
 --match-px and the group has no skeleton from the same input yet (one pipeline never
-supplies two copies of the same larva). Each group is fused into one skeleton by averaging
-every node weighted by its point score. The number of inputs supporting each fused skeleton
-is written to a sidecar CSV and can be used as a filter (--min-support).
+supplies two copies of the same larva).
+
+Each group becomes one skeleton (--representative):
+  fuse      average every node weighted by its point score;
+  priority  take the skeleton from the first input listed in --priority that is in the group.
+
+Groups supported by at least --min-support inputs are kept, and so is any group containing a
+--trusted input (e.g. the high-precision body pipeline). With --min-support 2, a group
+found by only one input can still be kept if its mean point score is at least
+--single-min-score and it does not duplicate a kept skeleton (at least --dup-nodes nodes
+within --dup-px of the kept skeleton's same nodes). The number of supporting inputs is
+written to a sidecar CSV.
+
+Inputs may cover several videos (e.g. predictions on a labels file); videos are matched by
+filename and frames by (video, frame index).
 
 Example:
   python scripts/model-assessment/merge_poses.py \
@@ -30,11 +42,8 @@ def mean_distance(a, b):
     return float(np.nanmean(d)) if np.isfinite(d).any() else np.inf
 
 
-def merge_frame(skeletons, match_px=10.0):
-    """skeletons: list of (source, points (n_nodes, 2), point_scores (n_nodes,)).
-
-    Returns a list of (points, point_scores, sources) with one entry per merged larva.
-    """
+def group_skeletons(skeletons, match_px=10.0):
+    """Greedy grouping; returns a list of member-index lists (see module docstring)."""
     order = sorted(range(len(skeletons)), key=lambda i: -np.nanmean(skeletons[i][2]))
     groups = []                                    # each: {'members': [index], 'sources': set, 'points': fused}
     for i in order:
@@ -52,11 +61,7 @@ def merge_frame(skeletons, match_px=10.0):
             best['members'].append(i)
             best['sources'].add(source)
             best['points'] = fuse([skeletons[j] for j in best['members']])[0]
-    out = []
-    for g in groups:
-        points, scores = fuse([skeletons[j] for j in g['members']])
-        out.append((points, scores, sorted(g['sources'])))
-    return out
+    return [g['members'] for g in groups]
 
 
 def fuse(members):
@@ -74,41 +79,81 @@ def fuse(members):
     return fused, fused_scores
 
 
+def represent(members, representative='fuse', priority=()):
+    if representative == 'fuse':
+        return fuse(members)
+    rank = {s: k for k, s in enumerate(priority)}
+    best = min(members, key=lambda m: (rank.get(m[0], len(rank)), -np.nanmean(m[2])))
+    return best[1].copy(), best[2].copy()
+
+
+def merge_frame(skeletons, match_px=10.0, representative='fuse', priority=(), min_support=1,
+                single_min_score=None, dup_px=5.0, dup_nodes=2, trusted=()):
+    """skeletons: list of (source, points (n_nodes, 2), point_scores (n_nodes,)).
+
+    Returns a list of (points, point_scores, sources), one entry per kept larva.
+    """
+    merged = []
+    for members in group_skeletons(skeletons, match_px):
+        group = [skeletons[j] for j in members]
+        points, scores = represent(group, representative, priority)
+        merged.append((points, scores, sorted({m[0] for m in group})))
+    kept = [m for m in merged if len(m[2]) >= min_support or set(m[2]) & set(trusted)]
+    if single_min_score is not None:
+        for points, scores, sources in sorted((m for m in merged if len(m[2]) < min_support and not set(m[2]) & set(trusted)),
+                                              key=lambda m: -np.nanmean(m[1])):
+            if np.nanmean(scores) < single_min_score:
+                continue
+            near = [np.sum(np.linalg.norm(points - k[0], axis=1) <= dup_px) for k in kept]
+            if not near or max(near) < dup_nodes:
+                kept.append((points, scores, sources))
+    return kept
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--input', nargs=2, action='append', required=True, metavar=('LABEL', 'SLP'))
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--match-px', type=float, default=10.0)
     parser.add_argument('--min-support', type=int, default=1)
+    parser.add_argument('--representative', choices=['fuse', 'priority'], default='fuse')
+    parser.add_argument('--priority', nargs='+', default=[], help='Input labels in order of preference')
+    parser.add_argument('--single-min-score', type=float, default=None)
+    parser.add_argument('--dup-px', type=float, default=5.0)
+    parser.add_argument('--dup-nodes', type=int, default=2)
+    parser.add_argument('--trusted', nargs='*', default=[], help='Inputs whose skeletons are always kept')
     args = parser.parse_args()
 
     inputs = [(label, sio.load_slp(path, open_videos=False)) for label, path in args.input]
     skeleton = inputs[0][1].skeletons[0]
     if any(labels.skeletons[0].node_names != skeleton.node_names for _, labels in inputs):
         raise ValueError('All inputs must share a skeleton')
-    video = inputs[0][1].videos[0]
-    if any(len(labels.videos) != 1 or labels.videos[0].shape != video.shape for _, labels in inputs):
-        raise ValueError('All inputs must be predictions on the same single video')
-
+    videos = inputs[0][1].videos
+    names = [str(v.filename) for v in videos]
     by_frame = {}
     for label, labels in inputs:
         for frame in labels:
+            name = str(frame.video.filename)
+            if name not in names:
+                raise ValueError(f'{label}: video {name} is not in the first input')
+            key = (names.index(name), int(frame.frame_idx))
             for inst in frame.instances:
-                by_frame.setdefault(int(frame.frame_idx), []).append((label, inst.numpy(), np.asarray(inst.points['score'], float)))
+                by_frame.setdefault(key, []).append((label, inst.numpy(), np.asarray(inst.points['score'], float)))
     frames, sidecar = [], []
-    for frame_idx in sorted(by_frame):
-        merged = [m for m in merge_frame(by_frame[frame_idx], args.match_px) if len(m[2]) >= args.min_support]
+    for key in sorted(by_frame):
+        merged = merge_frame(by_frame[key], args.match_px, args.representative, args.priority, args.min_support,
+                             args.single_min_score, args.dup_px, args.dup_nodes, args.trusted)
         instances = []
         for points, scores, sources in merged:
             instances.append(sio.PredictedInstance.from_numpy(points, skeleton, point_scores=np.nan_to_num(scores),
                                                               score=float(np.nanmean(scores))))
-            sidecar.append({'frame_idx': frame_idx, 'instance': len(instances) - 1, 'support': len(sources),
-                            'sources': '+'.join(sources)})
-        frames.append(sio.LabeledFrame(video, frame_idx, instances))
+            sidecar.append({'video': key[0], 'frame_idx': key[1], 'instance': len(instances) - 1,
+                            'support': len(sources), 'sources': '+'.join(sources)})
+        frames.append(sio.LabeledFrame(videos[key[0]], key[1], instances))
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    sio.Labels(labeled_frames=frames, videos=[video], skeletons=[skeleton]).save(str(args.output))
+    sio.Labels(labeled_frames=frames, videos=list(videos), skeletons=[skeleton]).save(str(args.output))
     with args.output.with_suffix('.support.csv').open('w', newline='') as handle:
-        writer = csv.DictWriter(handle, fieldnames=['frame_idx', 'instance', 'support', 'sources'])
+        writer = csv.DictWriter(handle, fieldnames=['video', 'frame_idx', 'instance', 'support', 'sources'])
         writer.writeheader(); writer.writerows(sidecar)
     counts = np.bincount([r['support'] for r in sidecar], minlength=len(inputs) + 1)[1:]
     print(f'Wrote {args.output}: {len(sidecar)} skeletons over {len(frames)} frames; support ' +

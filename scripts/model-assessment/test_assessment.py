@@ -31,6 +31,22 @@ class MergeTests(unittest.TestCase):
         merged = merge_frame([('body', larva(0, 0), s), ('body', larva(0, 6), s)], 10)
         self.assertEqual(len(merged), 2)
 
+    def test_trusted_source_and_single_rescue(self):
+        s = np.ones(5)
+        a, b, c = larva(0, 0), larva(0, 100), larva(0, 200)
+        skeletons = [('body', a, s), ('head', a + 1, s),      # confirmed by two pipelines
+                     ('body', b, s),                            # body only: kept because trusted
+                     ('head', c, np.full(5, .9)),               # head only, confident, not a duplicate
+                     ('tail', a + 30, np.full(5, .9))]          # tail only, overlaps nothing -> rescued only by score
+        kept = merge_frame(skeletons, 10, min_support=2, trusted=['body'])
+        self.assertEqual(len(kept), 2)
+        kept = merge_frame(skeletons, 10, min_support=2, trusted=['body'], single_min_score=0.8)
+        self.assertEqual(len(kept), 4)
+        # a single-pipeline duplicate (3 nodes within 5 px of a kept skeleton) is not rescued
+        dup = a.copy(); dup[3:] += 40
+        kept = merge_frame([('body', a, s), ('head', a, s), ('tail', dup, s)], 10, min_support=2, single_min_score=0.5)
+        self.assertEqual(len(kept), 1)
+
     def test_score_weighting_and_missing_nodes(self):
         a = larva(0, 0)
         low = a + np.array([4.0, 0.0])
