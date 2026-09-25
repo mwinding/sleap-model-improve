@@ -74,7 +74,7 @@ model_config:
     swint: null
     unet:
       convs_per_block: 2
-      filters: 16
+      filters: 32
       filters_rate: 1.5
       in_channels: 1
       kernel_size: 3
