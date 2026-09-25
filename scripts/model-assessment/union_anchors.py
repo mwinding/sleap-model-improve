@@ -25,6 +25,48 @@ from pathlib import Path
 from assess_centroids import load_benchmark, write_csv
 
 
+def load_hits(folder, model):
+    """Per labelled larva and repeat, whether `model` detected it; plus its false-positive count."""
+    folder = Path(folder)
+    meta = json.loads((folder/'assessment.json').read_text())
+    hits, fp = {}, 0
+    with (folder/'matches.csv').open() as handle:
+        for r in csv.DictReader(handle):
+            if r['model'] != model:
+                continue
+            if r['status'] == 'FP':
+                fp += 1
+            else:
+                hits[int(r['order']), int(r['gt_index']), int(r['repeat'])] = r['status'] == 'TP'
+    if not hits:
+        raise ValueError(f'No matches for {model} in {folder}')
+    return hits, fp, meta
+
+
+def benchmark_key(meta):
+    return meta['manifest_sha256'], meta['ground_truth_sha256'], meta['repeats']
+
+
+def common_subsets(meta, crowded_px=15.0):
+    """Body-based crowded flag per larva and hard flag per image, the same for every anchor."""
+    benchmark = load_benchmark(meta['manifest'], meta['ground_truth'], set(meta.get('excluded_orders', [])), 'body', crowded_px)
+    crowded = {(r['order'], i): bool(flag) for r in benchmark for i, flag in enumerate(r['crowded'])}
+    hard = {r['order']: r['subset'] == 'hard' for r in benchmark}
+    return crowded, hard
+
+
+def combined_recall(hit_sets, crowded, hard, repeats):
+    """Recall per subset when a larva counts as found if any hit set found it; and larvae missed."""
+    totals, tp = defaultdict(int), defaultdict(int)
+    for order, i, repeat in hit_sets[0]:
+        hit = any(h[order, i, repeat] for h in hit_sets)
+        for s in ['all', 'crowded' if crowded[order, i] else 'isolated'] + (['hard'] if hard[order] else []):
+            totals[s] += 1
+            tp[s] += hit
+    recall = {s: 100 * tp[s] / totals[s] for s in ('all', 'hard', 'crowded', 'isolated')}
+    return recall, (totals['all'] - tp['all']) / repeats
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--entry', nargs=3, action='append', required=True, metavar=('LABEL', 'ASSESSMENT_DIR', 'MODEL'),
@@ -36,53 +78,27 @@ def main():
     if len(set(labels)) != len(labels):
         parser.error('Entry labels must be unique')
 
-    found = {}          # label -> {(order, gt_index, repeat): bool}
-    fps = {}            # label -> false positives summed over all frames and repeats
-    metadata = None
+    found, fps, metadata = {}, {}, None
     for label, folder, model in args.entry:
-        folder = Path(folder)
-        meta = json.loads((folder/'assessment.json').read_text())
-        if metadata is None:
-            metadata = meta
-        elif (meta['manifest_sha256'], meta['ground_truth_sha256'], meta['repeats']) != \
-                (metadata['manifest_sha256'], metadata['ground_truth_sha256'], metadata['repeats']):
+        hits, fp, meta = load_hits(folder, model)
+        if metadata is not None and benchmark_key(meta) != benchmark_key(metadata):
             raise ValueError(f'{folder} was assessed on a different benchmark')
-        hits, fp = {}, 0
-        with (folder/'matches.csv').open() as handle:
-            for r in csv.DictReader(handle):
-                if r['model'] != model:
-                    continue
-                if r['status'] == 'FP':
-                    fp += 1
-                else:
-                    hits[int(r['order']), int(r['gt_index']), int(r['repeat'])] = r['status'] == 'TP'
-        if not hits:
-            raise ValueError(f'No matches for {model} in {folder}')
+        metadata = metadata or meta
         found[label], fps[label] = hits, fp
-
     keys = set.intersection(*(set(h) for h in found.values()))
     if any(len(h) != len(keys) for h in found.values()):
         raise ValueError('Assessments cover different larvae')
     repeats = metadata['repeats']
-    benchmark = load_benchmark(metadata['manifest'], metadata['ground_truth'], set(metadata.get('excluded_orders', [])),
-                               'body', args.crowded_px)
-    crowded = {(r['order'], i): bool(flag) for r in benchmark for i, flag in enumerate(r['crowded'])}
-    hard = {r['order']: r['subset'] == 'hard' for r in benchmark}
-    frames = len(benchmark) * repeats
+    crowded, hard = common_subsets(metadata, args.crowded_px)
+    frames = len(hard) * repeats
 
     rows = []
     for size in range(1, len(labels) + 1):
         for combo in itertools.combinations(labels, size):
-            totals, tp = defaultdict(int), defaultdict(int)
-            for order, i, repeat in keys:
-                hit = any(found[label][order, i, repeat] for label in combo)
-                subsets = ['all', 'crowded' if crowded[order, i] else 'isolated'] + (['hard'] if hard[order] else [])
-                for s in subsets:
-                    totals[s] += 1
-                    tp[s] += hit
+            recall, missed = combined_recall([found[label] for label in combo], crowded, hard, repeats)
             rows.append({'anchors': '+'.join(combo), 'n_anchors': size,
-                         **{f'{s}_recall_pct': 100 * tp[s] / totals[s] for s in ('all', 'hard', 'crowded', 'isolated')},
-                         'missed_larvae': (totals['all'] - tp['all']) / repeats,
+                         **{f'{s}_recall_pct': recall[s] for s in ('all', 'hard', 'crowded', 'isolated')},
+                         'missed_larvae': missed,
                          'fp_per_frame_upper_bound': sum(fps[label] for label in combo) / frames})
     args.output.mkdir(parents=True, exist_ok=True)
     write_csv(args.output/'union.csv', rows)
