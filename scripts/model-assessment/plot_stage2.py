@@ -82,18 +82,21 @@ def nodes_plot(nodes, models, node_names, output):
 CORRECT, WRONG, TRUTH = '#2ecc40', '#ff4136', 'white'
 
 
-def draw(ax, image, skeleton, view_centre, window, colour):
-    """One crop with one skeleton: a solid line along the nodes and a dot at the head end."""
+def draw(ax, image, skeleton, view_centre, window, colour, reference=None, anchor=None):
+    """One crop: optional thin reference skeleton, the skeleton itself, and the crop centre as a dot."""
     h, w = image.shape[:2]
     x0 = int(np.clip(view_centre[0] - window / 2, 0, w - window))
     y0 = int(np.clip(view_centre[1] - window / 2, 0, h - window))
     crop = image[y0:y0 + window, x0:x0 + window]
     ax.imshow(crop, cmap='gray' if crop.ndim == 2 else None, vmin=0, vmax=255)
+    if reference is not None:
+        ok = np.isfinite(reference).all(axis=1)
+        ax.plot(reference[ok, 0] - x0, reference[ok, 1] - y0, color=TRUTH, linewidth=1.2, zorder=2)
     ok = np.isfinite(skeleton).all(axis=1)
-    if ok.any():
-        ax.plot(skeleton[ok, 0] - x0, skeleton[ok, 1] - y0, color=colour, linewidth=3, solid_capstyle='round', zorder=3)
-        head = np.flatnonzero(ok)[0]
-        ax.plot(skeleton[head, 0] - x0, skeleton[head, 1] - y0, 'o', color=colour, markersize=7, zorder=4)
+    ax.plot(skeleton[ok, 0] - x0, skeleton[ok, 1] - y0, color=colour, linewidth=3, solid_capstyle='round', zorder=3)
+    if anchor is not None:
+        ax.plot(anchor[0] - x0, anchor[1] - y0, 'o', color='white', markeredgecolor='black', markeredgewidth=1.2,
+                markersize=8, zorder=4)
     ax.set_xlim(0, window); ax.set_ylim(window, 0)   # points outside the tile must not widen it
     ax.set_xticks([]); ax.set_yticks([])
     for spine in ax.spines.values():
@@ -126,7 +129,8 @@ def examples_plot(per_animal, models, ground_truth, predictions_dir, n_examples,
             rec = lookup[m, r['video'], r['frame_idx'], r['gt_index']]
             complete = all(rec[f'err_{n}'] for n in names)
             correct = rec['wrong_animal'] != 'True' and complete and float(rec['mean_error_px']) <= max_error
-            draw(axes[row, col], image, preds[m][key][i], centre, window, CORRECT if correct else WRONG)
+            draw(axes[row, col], image, preds[m][key][i], centre, window, CORRECT if correct else WRONG,
+                 reference=gt, anchor=gt[names.index(LABELS[m].lower())])
     for ax, name in zip(axes[0], columns):
         ax.set_title(name, fontsize=14, fontweight='bold', pad=8)
     fig.tight_layout(h_pad=0.3, w_pad=0.3)
