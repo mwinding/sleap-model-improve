@@ -1,0 +1,193 @@
+data_config:
+  augmentation_config:
+    geometric:
+      affine_p: 0.0
+      erase_p: 0.0
+      erase_ratio_max: 1.0
+      erase_ratio_min: 1.0
+      erase_scale_max: 0.01
+      erase_scale_min: 0.0001
+      flip_p: 0.0
+      mixup_lambda_max: 0.05
+      mixup_lambda_min: 0.01
+      mixup_p: 0.0
+      rotation_max: 15.0
+      rotation_min: -15.0
+      rotation_p: 1.0
+      scale_max: 1.1
+      scale_min: 0.9
+      scale_p: 1.0
+      translate_height: 0.0
+      translate_p: null
+      translate_width: 0.0
+    intensity: null
+  cache_img_path: null
+  cache_workers: 0
+  data_pipeline_fw: torch_dataset
+  delete_cache_imgs_after_training: true
+  negative_loss_weight: 1.0
+  parallel_caching: true
+  preprocessing:
+    crop_padding: null
+    crop_size: 176
+    ensure_grayscale: true
+    ensure_rgb: false
+    max_height: null
+    max_width: null
+    min_crop_size: 100
+    scale: 1.0
+    tiling:
+      accumulator_device: auto
+      blend: gaussian
+      center_jitter: 0.5
+      cpu_thresh: 0.4
+      enabled: false
+      full_frame_pass: false
+      min_overlap_fraction: 0.25
+      min_visible_keypoints: 1
+      overlap: null
+      samples_per_frame: null
+      sampling: foreground
+      sigma_scale: 0.125
+      steps_per_epoch: null
+      tile_batch_size: null
+      tile_fg_fraction: 0.5
+      tile_size: null
+  provider: LabelsReader
+  skeletons: null
+  test_file_path: null
+  train_labels_path:
+  - /camp/lab/windingm/home/shared/sleap/groundtruth/combined/combined_ground_truth_train.pkg.slp
+  - /camp/lab/windingm/home/shared/sleap/groundtruth/combined/synthetic_data_holdout/crossings_full-frame.slp
+  use_augmentations_train: true
+  use_existing_imgs: false
+  use_negative_frames: false
+  use_same_data_for_val: false
+  user_instances_only: true
+  val_labels_path: null
+  validation_fraction: 0.1
+description: ''
+filename: ''
+model_config:
+  backbone_config:
+    convnext: null
+    pretrained: null
+    swint: null
+    unet:
+      convs_per_block: 2
+      filters: 32
+      filters_rate: 1.5
+      in_channels: 1
+      kernel_size: 3
+      max_stride: 16
+      middle_block: true
+      output_stride: 2
+      stacks: 1
+      stem_stride: null
+      up_interpolate: true
+  head_configs:
+    bottomup: null
+    bottomup_segmentation: null
+    centered_instance:
+      confmaps:
+        part_names: null
+        anchor_part: body
+        sigma: 2.5
+        output_stride: 2
+        loss_weight: 1.0
+    centered_instance_segmentation: null
+    centroid: null
+    multi_class_bottomup: null
+    multi_class_topdown: null
+    semantic_segmentation: null
+    single_instance: null
+  init_weights: default
+  pretrained_backbone_weights: null
+  pretrained_head_weights: null
+  total_params: null
+name: ''
+sleap_nn_version: 0.3.3
+trainer_config:
+  ckpt_dir: /camp/lab/windingm/home/shared/models/sideview/experiments
+  early_stopping:
+    min_delta: 1.0e-08
+    patience: 20
+    stop_training_on_plateau: true
+  enable_progress_bar: true
+  eval:
+    enabled: false
+    frequency: 1
+    match_threshold: 50.0
+    oks_scale: null
+    oks_stddev: 0.025
+  keep_viz: false
+  lr_scheduler:
+    cosine_annealing_warmup: null
+    linear_warmup_linear_decay: null
+    reduce_lr_on_plateau:
+      cooldown: 3
+      factor: 0.5
+      min_lr: 1.0e-08
+      patience: 5
+      threshold: 1.0e-06
+      threshold_mode: abs
+    step_lr: null
+  max_epochs: 200
+  min_train_steps_per_epoch: 200
+  model_ckpt:
+    mode: min
+    monitor: val/loss
+    save_last: null
+    save_top_k: 1
+  online_hard_keypoint_mining:
+    hard_to_easy_ratio: 2.0
+    loss_scale: 5.0
+    max_hard_keypoints: null
+    min_hard_keypoints: 2
+    online_mining: false
+  optimizer:
+    amsgrad: false
+    lr: 0.0001
+  optimizer_name: Adam
+  profiler: null
+  resume_ckpt_path: null
+  run_name: centered_instance_body_synth_holdout
+  save_ckpt: true
+  seed: 42
+  train_data_loader:
+    batch_size: 2
+    num_workers: 0
+    shuffle: true
+  train_steps_per_epoch: null
+  trainer_accelerator: auto
+  trainer_device_indices: null
+  trainer_devices: null
+  trainer_strategy: auto
+  use_wandb: false
+  val_data_loader:
+    batch_size: 2
+    num_workers: 0
+    shuffle: false
+  visualize_preds_during_training: false
+  viz_img_format: png
+  wandb:
+    api_key: null
+    current_run_id: null
+    delete_local_logs: null
+    entity: null
+    group: null
+    log_viz_table: false
+    name: null
+    project: null
+    prv_runid: null
+    save_viz_imgs_wandb: false
+    viz_box_size: 5.0
+    viz_boxes: false
+    viz_confmap_threshold: 0.1
+    viz_enabled: true
+    viz_masks: false
+    wandb_mode: null
+  zmq:
+    controller_polling_timeout: 10
+    controller_port: null
+    publish_port: null

@@ -42,8 +42,19 @@ def mean_distance(a, b):
     return float(np.nanmean(d)) if np.isfinite(d).any() else np.inf
 
 
-def group_skeletons(skeletons, match_px=10.0):
-    """Greedy grouping; returns a list of member-index lists (see module docstring)."""
+def agree_nodes(a, b, px):
+    """Number of nodes present in both skeletons that lie within px of each other."""
+    return int(np.sum(np.linalg.norm(a - b, axis=1) <= px))
+
+
+def group_skeletons(skeletons, match_px=10.0, agree_px=None, agree_min=3):
+    """Greedy grouping; returns a list of member-index lists (see module docstring).
+
+    With agree_px set, two skeletons count as the same larva only if at least agree_min
+    nodes lie within agree_px of each other (in addition to the mean-distance rule). This
+    separates side-by-side neighbours, which are offset at every node, from duplicates of
+    one larva, which agree closely at most nodes.
+    """
     order = sorted(range(len(skeletons)), key=lambda i: -np.nanmean(skeletons[i][2]))
     groups = []                                    # each: {'members': [index], 'sources': set, 'points': fused}
     for i in order:
@@ -53,6 +64,8 @@ def group_skeletons(skeletons, match_px=10.0):
             if source in g['sources']:
                 continue
             d = mean_distance(points, g['points'])
+            if agree_px is not None and agree_nodes(points, g['points'], agree_px) < agree_min:
+                continue
             if d <= match_px and d < best_d:
                 best, best_d = g, d
         if best is None:
@@ -88,13 +101,13 @@ def represent(members, representative='fuse', priority=()):
 
 
 def merge_frame(skeletons, match_px=10.0, representative='fuse', priority=(), min_support=1,
-                single_min_score=None, dup_px=5.0, dup_nodes=2, trusted=()):
+                single_min_score=None, dup_px=5.0, dup_nodes=2, trusted=(), agree_px=None, agree_min=3):
     """skeletons: list of (source, points (n_nodes, 2), point_scores (n_nodes,)).
 
     Returns a list of (points, point_scores, sources), one entry per kept larva.
     """
     merged = []
-    for members in group_skeletons(skeletons, match_px):
+    for members in group_skeletons(skeletons, match_px, agree_px, agree_min):
         group = [skeletons[j] for j in members]
         points, scores = represent(group, representative, priority)
         merged.append((points, scores, sorted({m[0] for m in group})))
@@ -122,6 +135,8 @@ def main():
     parser.add_argument('--dup-px', type=float, default=5.0)
     parser.add_argument('--dup-nodes', type=int, default=2)
     parser.add_argument('--trusted', nargs='*', default=[], help='Inputs whose skeletons are always kept')
+    parser.add_argument('--agree-px', type=float, default=None, help='Also require --agree-min nodes within this distance to group')
+    parser.add_argument('--agree-min', type=int, default=3)
     args = parser.parse_args()
 
     inputs = [(label, sio.load_slp(path, open_videos=False)) for label, path in args.input]
@@ -142,7 +157,7 @@ def main():
     frames, sidecar = [], []
     for key in sorted(by_frame):
         merged = merge_frame(by_frame[key], args.match_px, args.representative, args.priority, args.min_support,
-                             args.single_min_score, args.dup_px, args.dup_nodes, args.trusted)
+                             args.single_min_score, args.dup_px, args.dup_nodes, args.trusted, args.agree_px, args.agree_min)
         instances = []
         for points, scores, sources in merged:
             instances.append(sio.PredictedInstance.from_numpy(points, skeleton, point_scores=np.nan_to_num(scores),
