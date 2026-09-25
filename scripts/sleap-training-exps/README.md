@@ -93,3 +93,16 @@ python scripts/synthetic-data/filter_extra_animals.py --crossings $O/crops_paral
 
 1,103 and 3,245 crops are kept. Same seed, so the 3k set contains the 1k set. Configs:
 `configs/holdout/centroid_synth_crops_parallel1k_holdout.yaml` and `..._parallel3k_holdout.yaml`.
+
+## Anchor × synthetic-data grid
+
+A 2×2 design, everything else fixed at the full res + body settings, each cell trained with
+seed 42 and seed 7 (the seed also sets the train/validation split):
+
+| | Real data only | Real + full-frame synthetic |
+|---|---|---|
+| Body anchor | `centroid_fullres_body_holdout` | `centroid_body_synth_fullframe_darkoverlap_v1_holdout` |
+| Mouthhooks anchor | `centroid_fullres_mouthhooks_holdout` | `centroid_synth_fullframe_mouthhooks_holdout` |
+
+Seed-7 configs have the same names with `_seed7`. Mouthhooks models are assessed with
+`assess_centroids.py --target-node mouthhooks`.
