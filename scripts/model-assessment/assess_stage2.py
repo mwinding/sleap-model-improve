@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -26,6 +27,43 @@ from assess_poses import mean_node_distance
 def frame_key(frame):
     video = frame.video.source_video or frame.video
     return str(video.filename), int(frame.frame_idx)
+
+
+def pair_with_larvae(gt, pred, key, model, tolerance=3.0):
+    """Return predictions reordered to label order, with an all-NaN row for a larva with no prediction.
+
+    sleap-nn returns one skeleton per labelled larva in label order, but drops a larva whose
+    prediction is entirely empty. Each skeleton's anchor node lies on its crop centre (the
+    labelled anchor), so pairing uses the node where predictions and labels coincide.
+    """
+    if len(pred) == len(gt):
+        return pred
+    if len(pred) > len(gt):
+        raise ValueError(f'{model}: {key} has {len(pred)} predictions for {len(gt)} larvae')
+    # Order is preserved and only whole larvae are dropped, so align the two sequences:
+    # every prediction is paired with a later larva than the previous one, minimising the
+    # (capped) anchor-node distance. The anchor node is where predictions sit on labels.
+    dist = np.linalg.norm(gt[:, None] - pred[None], axis=3)          # (n_gt, n_pred, n_nodes)
+    with warnings.catch_warnings():                     # nodes missing from every prediction are expected
+        warnings.simplefilter('ignore', RuntimeWarning)
+        anchor = int(np.nanargmin(np.nanmedian(np.nanmin(dist, axis=0), axis=0)))
+    cost = np.minimum(np.nan_to_num(dist[:, :, anchor], nan=50.0), 50.0)
+    n, m = cost.shape
+    best = np.full((n + 1, m + 1), np.inf)
+    best[0, 0] = 0.0
+    for i in range(1, n + 1):
+        best[i, 0] = 0.0
+        for j in range(1, min(i, m) + 1):
+            best[i, j] = min(best[i - 1, j], best[i - 1, j - 1] + cost[i - 1, j - 1])
+    out = np.full_like(gt, np.nan)
+    i, j = n, m
+    while j > 0:
+        if i > j and best[i, j] == best[i - 1, j]:
+            i -= 1                                      # larva i-1 had no prediction
+        else:
+            out[i - 1] = pred[j - 1]
+            i, j = i - 1, j - 1
+    return out
 
 
 def main():
@@ -58,9 +96,7 @@ def main():
         for frame in pred_labels:
             key = frame_key(frame)
             gt, crowded = truth[key]
-            pred = np.stack([i.numpy() for i in frame.instances])
-            if len(pred) != len(gt):
-                raise ValueError(f'{model}: {key} has {len(pred)} predictions for {len(gt)} larvae')
+            pred = pair_with_larvae(gt, np.stack([i.numpy() for i in frame.instances]), key, model)
             seen.add(key)
             dist = mean_node_distance(gt, pred)          # rows GT, columns predictions
             for i in range(len(gt)):
