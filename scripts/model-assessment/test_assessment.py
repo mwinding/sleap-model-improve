@@ -63,6 +63,22 @@ class AssessmentTests(unittest.TestCase):
             self.assertEqual(missing,[1])
             self.assertEqual(len(predictions[1][0]),0)
 
+    def test_full_pose_predictions_use_target_node(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'poses.slp'
+            skeleton=sio.Skeleton(['head','mouthhooks','body','tail','spiracle'])
+            video=sio.Video('missing.mp4',backend=None,backend_metadata={'shape':[1,100,100,1]})
+            full=np.array([[10.,10.],[12.,12.],[20.,20.],[28.,28.],[30.,30.]])
+            no_body=full.copy(); no_body[2]=np.nan
+            instances=[sio.PredictedInstance.from_numpy(p,skeleton,point_scores=np.full(5,.9),score=.9) for p in (full,no_body)]
+            sio.Labels([sio.LabeledFrame(video,0,instances)],videos=[video],skeletons=[skeleton]).save(str(path))
+            body,_=load_predictions(path,1,'body')
+            head,_=load_predictions(path,1,'head')
+            self.assertEqual(body[0][0].tolist(),[[20.,20.]])  # instance without a body node is skipped
+            self.assertEqual(len(head[0][0]),2)
+            with self.assertRaises(ValueError):
+                load_predictions(path,1,'wing')
+
 
 if __name__=='__main__':
     unittest.main()

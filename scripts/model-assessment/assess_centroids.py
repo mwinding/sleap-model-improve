@@ -50,13 +50,20 @@ def match_points(gt, predictions, tolerance=15.0):
     predictions = np.asarray(predictions).reshape(-1, 2)
     if not len(gt) or not len(predictions):
         return []
-    distances = cdist(gt, predictions)
-    penalty = (min(len(gt), len(predictions)) + 1) * (tolerance + 1)
-    cost = np.full((len(gt), len(predictions) + len(gt)), penalty)
-    cost[:, :len(predictions)] = np.where(distances <= tolerance, distances, penalty * 2)
+    return match_distances(cdist(gt, predictions), tolerance)
+
+
+def match_distances(distances, tolerance):
+    """match_points on a precomputed GT x prediction distance matrix (inf = not allowed)."""
+    n_gt, n_pred = distances.shape
+    if not n_gt or not n_pred:
+        return []
+    penalty = (min(n_gt, n_pred) + 1) * (tolerance + 1)
+    cost = np.full((n_gt, n_pred + n_gt), penalty)
+    cost[:, :n_pred] = np.where(distances <= tolerance, distances, penalty * 2)
     rows, cols = linear_sum_assignment(cost)
     return [(int(i), int(j), float(distances[i, j])) for i, j in zip(rows, cols)
-            if j < len(predictions) and distances[i, j] <= tolerance]
+            if j < n_pred and distances[i, j] <= tolerance]
 
 
 def crowded_flags(instances, targets, crowded_px):
@@ -174,7 +181,9 @@ def verify_video(video_path, gt_path, rows, repeats):
     return audit
 
 
-def load_predictions(path, expected):
+def load_predictions(path, expected, node='body'):
+    """Detections per frame. Centroid-only predictions use their single point; full-pose
+    predictions (e.g. bottom-up) use `node`, and instances without that node are skipped."""
     labels = sio.load_slp(str(path), open_videos=False)
     if len(labels.videos) != 1:
         raise ValueError(f'{path}: expected one comparison video')
@@ -189,10 +198,17 @@ def load_predictions(path, expected):
         for instance in frame.instances:
             if not isinstance(instance, sio.PredictedInstance):
                 raise ValueError(f'{path}: contains user labels instead of predictions')
-            if instance.skeleton.node_names != ['centroid']:
-                raise ValueError(f'{path}: requires centroid-only prediction instances')
-            point = instance.points['xy'][0]
-            score = float(instance.points['score'][0])
+            names = instance.skeleton.node_names
+            if names == ['centroid']:
+                k = 0
+            elif node in names:
+                k = names.index(node)
+            else:
+                raise ValueError(f'{path}: predictions have neither a centroid nor a {node!r} node')
+            point = instance.points['xy'][k]
+            score = float(instance.points['score'][k])
+            if names != ['centroid'] and not np.isfinite(point).all():
+                continue  # full-pose instance without this node: no detection for it
             if not np.isfinite(point).all() or not np.isfinite(score):
                 raise ValueError(f'{path}: invalid predicted coordinate/score')
             points.append(point)
@@ -256,7 +272,7 @@ def main():
     for path in paths:
         target = target_for_model(path.stem, args.target)
         model_benchmark = [{**r, 'gt': r['gt_mean'] if target == 'mean' else r['gt']} for r in benchmark]
-        predictions, missing = load_predictions(path, len(benchmark)*args.repeats)
+        predictions, missing = load_predictions(path, len(benchmark)*args.repeats, args.target_node)
         provenance.append({'model': path.stem, 'target': target, 'path': str(path.resolve()),
                            'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
                            'omitted_prediction_frames_treated_as_empty': missing})

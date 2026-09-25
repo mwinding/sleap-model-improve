@@ -197,3 +197,17 @@ all labeled frames. Nodes closer than ~2x the effective sigma fuse into one conf
 point lies within `--crowded-px` (default 15) of another animal's skeleton polyline, and
 **isolated** otherwise. These are recall-only (a false positive belongs to no animal) and are
 independent of which frames were selected, unlike the frame-level hard subset.
+
+## Full-pose models and anchor combinations
+
+- `assess_centroids.py` also scores full-pose predictions (bottom-up or top-down) on detection:
+  it uses the `--target-node` of each predicted skeleton, so results compare directly with the
+  centroid models.
+- `assess_poses.py --models NAME ...` matches whole predicted skeletons to labelled larvae and
+  reports instance recall/precision, per-node error, PCK@5/10 px and the share of complete
+  skeletons, overall and for crowded vs isolated larvae (`pose_summary.csv`, `pose_nodes.csv`,
+  `pose_per_animal.csv`).
+- `union_anchors.py --entry LABEL DIR MODEL ...` gives the recall of every combination of
+  anchor models (a larva counts if any member found it at its own node), with one crowded
+  definition (body-based) for all anchors. False positives are the summed upper bound before
+  merging duplicates.
