@@ -100,8 +100,18 @@ def represent(members, representative='fuse', priority=()):
     return best[1].copy(), best[2].copy()
 
 
+def suppress_duplicates(kept, px, nodes):
+    """Keep skeletons in order of (support, mean score); drop one sharing >= nodes nodes within px of a kept one."""
+    out = []
+    for m in sorted(kept, key=lambda m: (-len(m[2]), -np.nanmean(m[1]))):
+        if all(np.sum(np.linalg.norm(m[0] - k[0], axis=1) <= px) < nodes for k in out):
+            out.append(m)
+    return out
+
+
 def merge_frame(skeletons, match_px=10.0, representative='fuse', priority=(), min_support=1,
-                single_min_score=None, dup_px=5.0, dup_nodes=2, trusted=(), agree_px=None, agree_min=3):
+                single_min_score=None, dup_px=5.0, dup_nodes=2, trusted=(), agree_px=None, agree_min=3,
+                nms_px=None, nms_nodes=3):
     """skeletons: list of (source, points (n_nodes, 2), point_scores (n_nodes,)).
 
     Returns a list of (points, point_scores, sources), one entry per kept larva.
@@ -120,6 +130,8 @@ def merge_frame(skeletons, match_px=10.0, representative='fuse', priority=(), mi
             near = [np.sum(np.linalg.norm(points - k[0], axis=1) <= dup_px) for k in kept]
             if not near or max(near) < dup_nodes:
                 kept.append((points, scores, sources))
+    if nms_px is not None:
+        kept = suppress_duplicates(kept, nms_px, nms_nodes)
     return kept
 
 
@@ -137,6 +149,9 @@ def main():
     parser.add_argument('--trusted', nargs='*', default=[], help='Inputs whose skeletons are always kept')
     parser.add_argument('--agree-px', type=float, default=None, help='Also require --agree-min nodes within this distance to group')
     parser.add_argument('--agree-min', type=int, default=3)
+    parser.add_argument('--nms-px', type=float, default=None,
+                        help='Finally drop a skeleton sharing --nms-nodes nodes within this distance of a better-supported one')
+    parser.add_argument('--nms-nodes', type=int, default=3)
     args = parser.parse_args()
 
     inputs = [(label, sio.load_slp(path, open_videos=False)) for label, path in args.input]
@@ -157,7 +172,8 @@ def main():
     frames, sidecar = [], []
     for key in sorted(by_frame):
         merged = merge_frame(by_frame[key], args.match_px, args.representative, args.priority, args.min_support,
-                             args.single_min_score, args.dup_px, args.dup_nodes, args.trusted, args.agree_px, args.agree_min)
+                             args.single_min_score, args.dup_px, args.dup_nodes, args.trusted, args.agree_px, args.agree_min,
+                             args.nms_px, args.nms_nodes)
         instances = []
         for points, scores, sources in merged:
             instances.append(sio.PredictedInstance.from_numpy(points, skeleton, point_scores=np.nan_to_num(scores),
