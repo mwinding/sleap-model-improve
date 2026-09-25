@@ -7,6 +7,41 @@ import numpy as np
 import sleap_io as sio
 
 from assess_centroids import crowded_flags, load_predictions, match_points, metrics
+from merge_poses import merge_frame
+
+
+def larva(x, y, length=40.0):
+    """A straight 5-node larva along +x starting at (x, y)."""
+    return np.array([[x + k * length / 4, y] for k in range(5)])
+
+
+class MergeTests(unittest.TestCase):
+    def test_duplicates_from_different_pipelines_fuse(self):
+        a, b = larva(0, 0), larva(0, 100)
+        s = np.ones(5)
+        merged = merge_frame([('body', a, s), ('head', a + 2, s), ('tail', a - 2, s), ('body', b, s)], 10)
+        self.assertEqual(len(merged), 2)
+        fused = [m for m in merged if len(m[2]) == 3][0]
+        np.testing.assert_allclose(fused[0], a)                  # symmetric noise averages out
+        self.assertEqual(fused[2], ['body', 'head', 'tail'])
+
+    def test_one_pipeline_never_merges_two_larvae(self):
+        # Two parallel larvae 6 px apart, both found by the body pipeline: must stay separate.
+        s = np.ones(5)
+        merged = merge_frame([('body', larva(0, 0), s), ('body', larva(0, 6), s)], 10)
+        self.assertEqual(len(merged), 2)
+
+    def test_score_weighting_and_missing_nodes(self):
+        a = larva(0, 0)
+        low = a + np.array([4.0, 0.0])
+        missing = a.copy(); missing[4] = np.nan
+        merged = merge_frame([('body', a, np.full(5, .9)), ('head', low, np.full(5, .1)), ('tail', missing, np.full(5, .9))], 10)
+        self.assertEqual(len(merged), 1)
+        points, scores, sources = merged[0]
+        self.assertAlmostEqual(points[0, 0], (0 * .9 + 4 * .1 + 0 * .9) / 1.9)
+        self.assertAlmostEqual(points[4, 0], (40 * .9 + 44 * .1) / 1.0)   # spiracle from body and head only
+        self.assertTrue(np.isfinite(points).all())
+
 
 
 class AssessmentTests(unittest.TestCase):

@@ -211,3 +211,13 @@ independent of which frames were selected, unlike the frame-level hard subset.
   anchor models (a larva counts if any member found it at its own node), with one crowded
   definition (body-based) for all anchors. False positives are the summed upper bound before
   merging duplicates.
+
+## Pose models (stage 2) and merging
+
+- `assess_stage2.py` evaluates centered-instance models on crops centred at each labelled
+  larva's anchor (predict first with `sleap predict -i outputs/benchmark/benchmark_frames.pkg.slp
+  -m <model dir>`; with only a centered-instance model, sleap-nn uses the ground-truth anchors).
+  Reports per-node error, PCK and how often the skeleton belongs to a different larva.
+- `merge_poses.py` merges top-down predictions from several anchor pipelines into one set of
+  skeletons (group by mean node distance, at most one skeleton per pipeline per group, fuse by
+  point-score-weighted mean) and writes the number of supporting pipelines per skeleton.
