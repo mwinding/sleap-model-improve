@@ -25,9 +25,15 @@ from plot_assessment import format_percent_axis, gradient_colors, prism_style, r
 
 S = ROOT / 'outputs/model_assessment/stage2'
 LABELS = {'centered_instance_body_holdout': 'Body', 'centered_instance_head_holdout': 'Head',
-          'centered_instance_mouthhooks_holdout': 'Mouthhooks', 'centered_instance_tail_holdout': 'Tail'}
-ORDER = ['centered_instance_body_holdout', 'centered_instance_head_holdout',
-         'centered_instance_mouthhooks_holdout', 'centered_instance_tail_holdout']
+          'centered_instance_mouthhooks_holdout': 'Mouthhooks', 'centered_instance_tail_holdout': 'Tail',
+          'centered_instance_body_synth_holdout': 'Body + synthetic',
+          'centered_instance_mouthhooks_synth_holdout': 'Mouthhooks + synthetic'}
+ANCHOR = {m: l.split()[0].lower() for m, l in LABELS.items()}
+ORDER = ['centered_instance_body_holdout', 'centered_instance_body_synth_holdout', 'centered_instance_head_holdout',
+         'centered_instance_mouthhooks_holdout', 'centered_instance_mouthhooks_synth_holdout',
+         'centered_instance_tail_holdout']
+EXAMPLE_MODELS = ['centered_instance_body_holdout', 'centered_instance_mouthhooks_holdout', 'centered_instance_tail_holdout',
+                  'centered_instance_head_holdout']
 
 
 def summary_plot(summary, models, output):
@@ -64,10 +70,11 @@ def nodes_plot(nodes, models, node_names, output):
     for ax, (subset, title) in zip(axes, [('all', 'All larvae'), ('crowded', 'Crowded larvae')]):
         for k, (m, color) in enumerate(zip(models, colors)):
             # The crop is centred on the model's own anchor, so that node is trivially right: leave it out.
-            v = [np.nan if n == LABELS[m].lower() else float(nodes[m, subset, n]['pck5_pct']) for n in node_names]
+            v = [np.nan if n == ANCHOR[m] else float(nodes[m, subset, n]['pck5_pct']) for n in node_names]
             bars = ax.bar(x + (k - (len(models) - 1) / 2) * width, v, width * 0.92, color=color,
                           edgecolor='black', linewidth=1.0, label=LABELS.get(m, m), zorder=3)
-            ax.bar_label(bars, labels=['' if np.isnan(a) else f'{a:.0f}' for a in v], fontsize=9, padding=2)
+            if len(models) <= 4:                            # with more models the numbers overlap
+                ax.bar_label(bars, labels=['' if np.isnan(a) else f'{a:.0f}' for a in v], fontsize=9, padding=2)
         ax.set_xticks(x, [n.capitalize() for n in node_names], fontsize=12)
         format_percent_axis(ax)
         ax.tick_params(axis='y', labelleft=True)
@@ -130,7 +137,7 @@ def examples_plot(per_animal, models, ground_truth, predictions_dir, n_examples,
             complete = all(rec[f'err_{n}'] for n in names)
             correct = rec['wrong_animal'] != 'True' and complete and float(rec['mean_error_px']) <= max_error
             draw(axes[row, col], image, preds[m][key][i], centre, window, CORRECT if correct else WRONG,
-                 reference=gt, anchor=gt[names.index(LABELS[m].lower())])
+                 reference=gt, anchor=gt[names.index(ANCHOR[m])])
     for ax, name in zip(axes[0], columns):
         ax.set_title(name, fontsize=14, fontweight='bold', pad=8)
     fig.tight_layout(h_pad=0.3, w_pad=0.3)
@@ -154,7 +161,8 @@ def main():
     prism_style()
     summary_plot(summary, models, out / 'stage2_summary')
     nodes_plot(nodes, models, node_names, out / 'stage2_nodes')
-    examples_plot(read_csv(args.stage2 / 'stage2_per_animal.csv'), models, Path(meta['ground_truth']),
+    examples_plot(read_csv(args.stage2 / 'stage2_per_animal.csv'), [m for m in EXAMPLE_MODELS if m in models][:3],
+                  Path(meta['ground_truth']),
                   args.stage2 / 'predictions', args.examples, args.seed, out / 'stage2_examples')
     print(f'Wrote plots to {out}')
 
