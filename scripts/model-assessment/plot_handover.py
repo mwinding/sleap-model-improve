@@ -111,9 +111,67 @@ def stage2_counts():
     return counts
 
 
-def summary_plot(panels, output):
-    fig, axes = plt.subplots(1, len(panels), figsize=(8.2 * len(panels), 6.4), sharey=True)
-    rows = [(a, s) for a in ANCHORS for s, _ in SUBSETS]
+OWNERSHIP_ANCHORS = ['body', 'head', 'mouthhooks', 'tail']
+OWNERSHIP = [('own', 'Detected larva', '#2e8b57'), ('neighbour', 'A neighbour', '#e0453a'),
+             ('nothing', 'No larva', '#b0b0b0'), ('missing', 'No skeleton', '#dcdcdc')]
+
+
+def skeleton_owner(skeleton, gt, own):
+    """Whose skeleton is it: the detected larva, a neighbour, no larva (>15 px mean from all), or missing."""
+    if not np.isfinite(skeleton).any():
+        return 'missing'
+    d = np.nanmean(np.linalg.norm(gt - skeleton[None], axis=2), axis=1)
+    j = int(np.nanargmin(d))
+    if d[j] > TOL:
+        return 'nothing'
+    return 'own' if j == own else 'neighbour'
+
+
+def ownership_counts(folder):
+    """Real pipeline and crops at the labelled anchor, for all four pipelines including body."""
+    truth = test_truth()
+    real = {a: {s: {o: 0 for o, _, _ in OWNERSHIP} for s, _ in SUBSETS} for a in OWNERSHIP_ANCHORS}
+    for a in OWNERSHIP_ANCHORS:
+        k = NODES.index(a)
+        crops = {int(f.frame_idx): np.stack([i.numpy() for i in f.instances])
+                 for f in sio.load_slp(str(folder / f'crops_{a}.slp'), open_videos=False)}
+        known = {int(f.frame_idx): np.stack([i.numpy() for i in f.instances])
+                 for f in sio.load_slp(str(folder / f'known_{a}.slp'), open_videos=False) if len(f.instances)}
+        for frame, centres in crops.items():
+            if frame % 10:
+                continue
+            gt, crowded = truth[frame]
+            skel = known.get(frame)
+            aligned = pair_with_larvae(centres, skel, frame, a) if skel is not None else np.full_like(centres, np.nan)
+            for det, s in zip(centres[:, k], aligned):
+                d = np.linalg.norm(gt[:, k] - det, axis=1)
+                own = int(np.argmin(d))
+                if d[own] > TOL:
+                    continue
+                o = skeleton_owner(s, gt, own)
+                for sub in ('crowded' if crowded[own] else 'others', 'total'):
+                    real[a][sub][o] += 1
+    labels = sio.load_slp(str(A / '../benchmark/benchmark_frames.pkg.slp'), open_videos=False)
+    truth2 = {}
+    for f in labels:
+        gt = np.stack([i.numpy() for i in f.instances])
+        truth2[frame_key(f)] = (gt, crowded_flags(list(f.instances), gt[:, BODY], 15.0))
+    crops = {a: {s: {o: 0 for o, _, _ in OWNERSHIP} for s, _ in SUBSETS} for a in OWNERSHIP_ANCHORS}
+    for a in OWNERSHIP_ANCHORS:
+        for f in sio.load_slp(str(A / f'stage2/predictions/centered_instance_{a}_holdout.slp'), open_videos=False):
+            gt, crowded = truth2[frame_key(f)]
+            pred = pair_with_larvae(gt, np.stack([i.numpy() for i in f.instances]), frame_key(f), a)
+            for i in range(len(gt)):
+                o = skeleton_owner(pred[i], gt, i)
+                for sub in ('crowded' if crowded[i] else 'others', 'total'):
+                    crops[a][sub][o] += 1
+    return real, crops
+
+
+def summary_plot(panels, output, anchors=ANCHORS, outcomes=OUTCOMES, legend_title='Body point lands on',
+                 xlabels=('Detections (%)', 'Larvae (%)')):
+    fig, axes = plt.subplots(1, len(panels), figsize=(8.2 * len(panels), 1.6 + 0.62 * 3 * len(anchors)), sharey=True)
+    rows = [(a, s) for a in anchors for s, _ in SUBSETS]
     y, pos = [], 0.0
     for r, (a, s) in enumerate(rows):
         if r and s == 'crowded':
@@ -121,9 +179,9 @@ def summary_plot(panels, output):
         y.append(pos)
         pos += 1.0
     labels = [f"{a.capitalize()}: {dict(SUBSETS)[s].lower()}" for a, s in rows]
-    for ax, (title, counts) in zip(axes, panels):
+    for ax, (title, counts), xlabel in zip(axes, panels, xlabels):
         left = np.zeros(len(rows))
-        for o, name, color in OUTCOMES:
+        for o, name, color in outcomes:
             vals = np.array([100 * counts[a][s][o] / max(sum(counts[a][s].values()), 1) for a, s in rows])
             bars = ax.barh(y, vals, 0.72, left=left, color=color, edgecolor='white', linewidth=1.2, label=name, zorder=3)
             for bar, v, l in zip(bars, vals, left):
@@ -135,12 +193,12 @@ def summary_plot(panels, output):
         ax.tick_params(axis='y', labelleft=True)
         ax.set_ylim(pos - 0.2, -0.8)
         format_percent_axis(ax, horizontal=True)
-        ax.set_xlabel('Detections (%)' if 'pipeline' in title.lower() else 'Larvae (%)')
+        ax.set_xlabel(xlabel)
         ax.set_title(title)
     handles, names = axes[0].get_legend_handles_labels()
-    fig.legend(handles, names, loc='lower center', ncol=len(OUTCOMES), fontsize=12, bbox_to_anchor=(0.5, -0.02),
-               title='Body point lands on', title_fontsize=12)
-    fig.tight_layout(w_pad=3, rect=(0, 0.08, 1, 1))
+    fig.legend(handles, names, loc='lower center', ncol=len(outcomes), fontsize=12, bbox_to_anchor=(0.5, -0.02),
+               title=legend_title, title_fontsize=12)
+    fig.tight_layout(w_pad=3, rect=(0, 0.07, 1, 1))
     save_plot(fig, output)
 
 
@@ -215,6 +273,17 @@ def main():
             for a in ANCHORS:
                 for s, _ in SUBSETS:
                     writer.writerow([name, a, s, sum(counts[a][s].values()), *[counts[a][s][o] for o, _, _ in OUTCOMES]])
+    real_own, crops_own = ownership_counts(args.pipeline_dir)
+    summary_plot([('Real pipeline, test video', real_own), ('Crops at the labelled anchor', crops_own)],
+                 args.output_dir / 'skeleton_ownership', anchors=OWNERSHIP_ANCHORS, outcomes=OWNERSHIP,
+                 legend_title='Skeleton belongs to')
+    with (args.output_dir / 'skeleton_ownership.csv').open('w', newline='') as handle:
+        writer = csv.writer(handle)
+        writer.writerow(['analysis', 'anchor', 'subset', 'n', *[o for o, _, _ in OWNERSHIP]])
+        for name, counts in (('real_pipeline', real_own), ('crops_at_anchor', crops_own)):
+            for a in OWNERSHIP_ANCHORS:
+                for sub, _ in SUBSETS:
+                    writer.writerow([name, a, sub, sum(counts[a][sub].values()), *[counts[a][sub][o] for o, _, _ in OWNERSHIP]])
     pool = examples_plot(cases, args.examples, args.seed, args.output_dir / 'body_point_handover_examples')
     print(f'Wrote summary, examples (random {args.examples} of {pool} crowded handover cases) and CSV to {args.output_dir}')
 
