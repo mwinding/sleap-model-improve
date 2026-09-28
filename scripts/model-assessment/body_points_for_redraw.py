@@ -14,7 +14,9 @@ sleap-nn crop around exactly those points (ground-truth-centroid mode), in the s
   python scripts/model-assessment/body_points_for_redraw.py centroid_fullres_tail_holdout.slp preds/crops_tail.slp \
       --node tail --skeleton-from outputs/benchmark/benchmark_frames.pkg.slp
 
-Skeletons without the node are dropped (reported).
+Skeletons without the node are dropped (reported), unless --fill-missing is given: then the node
+is interpolated between the nearest present nodes on either side along the skeleton chain
+(e.g. a missing body point halfway between mouthhooks and tail), if there are such nodes.
 """
 from __future__ import annotations
 
@@ -24,6 +26,18 @@ import numpy as np
 import sleap_io as sio
 
 
+def fill_node(points, k):
+    """Interpolate node k from the nearest present nodes before and after it along the chain."""
+    ok = np.isfinite(points).all(axis=1)
+    before = [i for i in range(k) if ok[i]]
+    after = [i for i in range(k + 1, len(points)) if ok[i]]
+    if not before or not after:
+        return None
+    a, b = before[-1], after[0]
+    t = (k - a) / (b - a)
+    return points[a] + t * (points[b] - points[a])
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('predictions')
@@ -31,6 +45,7 @@ def main():
     parser.add_argument('--node', default='body')
     parser.add_argument('--skeleton-from', default=None, help='Labels file supplying the full skeleton for centroid-only input')
     parser.add_argument('--video', default=None, help='Replace the (single) video path, e.g. with a locally mounted copy')
+    parser.add_argument('--fill-missing', action='store_true', help='Interpolate a missing node from its neighbours')
     args = parser.parse_args()
     labels = sio.load_slp(args.predictions, open_videos=False)
     if args.video:
@@ -41,11 +56,15 @@ def main():
     skeleton = sio.load_slp(args.skeleton_from, open_videos=False).skeletons[0] if args.skeleton_from else source
     k = skeleton.node_names.index(args.node)
     k_in = 0 if source.node_names == ['centroid'] else source.node_names.index(args.node)
-    frames, kept, dropped = [], 0, 0
+    frames, kept, dropped, filled = [], 0, 0, 0
     for frame in labels:
         instances = []
         for inst in frame.instances:
             point = inst.numpy()[k_in]
+            if not np.isfinite(point).all() and args.fill_missing and source.node_names != ['centroid']:
+                estimate = fill_node(inst.numpy(), k_in)
+                if estimate is not None:
+                    point, filled = estimate, filled + 1
             if not np.isfinite(point).all():
                 dropped += 1
                 continue
@@ -56,7 +75,8 @@ def main():
         if instances:
             frames.append(sio.LabeledFrame(frame.video, frame.frame_idx, instances))
     sio.Labels(labeled_frames=frames, videos=labels.videos, skeletons=[skeleton]).save(args.output)
-    print(f'{args.output}: {kept} {args.node} points on {len(frames)} frames ({dropped} without a {args.node} node dropped)')
+    print(f'{args.output}: {kept} {args.node} points on {len(frames)} frames ({filled} interpolated, '
+          f'{dropped} without a {args.node} node dropped)')
 
 
 if __name__ == '__main__':
