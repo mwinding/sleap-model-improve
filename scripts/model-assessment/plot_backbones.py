@@ -5,12 +5,12 @@ Pose models (--group pose):
 1. pose_known_centre: crops centred on each labelled larva's body point (assess_stage2.py output):
    wrong-larva rate and nodes within 5 px for crowded larvae, and complete skeletons.
 2. pose_pipeline: the same pose models behind the UNet full-frame body detector (seed 42) on the
-   test video, counting complete skeletons only: larvae missed (crowded / all others / total) and precision.
+   test video, counting complete skeletons only: recall for crowded / other / all larvae, and precision.
 3. pose_examples: crowded larvae that the seed-42 models draw differently (some right, some wrong).
 
 Body detectors, all trained with the full-frame synthetic data (--group detector):
-4. detector_detection: body points found (assess_centroids.py output in the backbones folder).
-5. detector_pipeline: each detector followed by the UNet body pose model (seed 42), complete skeletons only.
+4. detector_detection: recall of body points (assess_centroids.py output in the backbones folder).
+5. detector_pipeline: each detector followed by the UNet body pose model (seed 42), recall of complete skeletons.
 """
 from __future__ import annotations
 import argparse
@@ -37,12 +37,13 @@ DETECTORS = [('UNet', f'{DETECTOR}_holdout'),
              ('ConvNeXt pretrained', f'{DETECTOR}_convnext_pretrained_holdout'),
              ('ConvNeXt from scratch', f'{DETECTOR}_convnext_scratch_holdout'),
              ('Swin pretrained', f'{DETECTOR}_swint_pretrained_holdout')]
-MISSED_PANELS = [('crowded', 'Crowded larvae missed', 'Larvae (of 155)'), ('others', 'Other larvae missed', 'Larvae (of 213)'),
-                 ('total', 'All larvae missed', 'Larvae (of 368)'), ('precision', 'Precision', 'Skeletons (%)')]
+RECALL_PANELS = [('crowded_recall', 'Crowded recall', 'Recall (%)'), ('others_recall', 'Other larvae recall', 'Recall (%)'),
+                 ('total_recall', 'Overall recall', 'Recall (%)'), ('precision', 'Precision', 'Precision (%)')]
 
 
 def missed(truth, preds, min_nodes=5):
-    """Larvae missed (crowded, others, total; mean per repeat) and precision, counting skeletons with >= min_nodes."""
+    """Larvae missed (crowded, others, total; mean per repeat), recall (%) per subset and precision,
+    counting skeletons with >= min_nodes."""
     tp = {'crowded': 0, 'others': 0}
     n = {'crowded': 0, 'others': 0}
     n_pred = 0
@@ -58,16 +59,17 @@ def missed(truth, preds, min_nodes=5):
     repeats = 10
     out = {s: (n[s] - tp[s]) / repeats for s in n}
     out['total'] = out['crowded'] + out['others']
+    for s in n:
+        out[f'{s}_recall'] = 100 * tp[s] / n[s]
+    out['total_recall'] = 100 * sum(tp.values()) / sum(n.values())
     out['precision'] = 100 * sum(tp.values()) / n_pred if n_pred else 0.0
     return out
 
 
-def missed_bars(output, labels, scores):
-    """scores[seed][model] -> dict from missed(); count panels scaled to the largest value."""
-    values = {k: [[s[k] for s in seed] for seed in scores] for k, _, _ in MISSED_PANELS}
-    limits = {k: (max(max(v) for v in values[k]), False) for k in ('crowded', 'others', 'total')}
-    limits['precision'] = (100, True)
-    paired_bars(output, labels, MISSED_PANELS, values, limits)
+def recall_bars(output, labels, scores):
+    """scores[seed][model] -> dict with *_recall and precision keys (percent)."""
+    values = {k: [[s[k] for s in seed] for seed in scores] for k, _, _ in RECALL_PANELS}
+    paired_bars(output, labels, RECALL_PANELS, values, {k: (100, True) for k, _, _ in RECALL_PANELS})
 
 
 def pose_plots(folder, out, truth, n_examples, seed):
@@ -80,7 +82,7 @@ def pose_plots(folder, out, truth, n_examples, seed):
                   for suffix, _ in SEEDS] for k, _, _ in panels}
     paired_bars(out / 'pose_known_centre', labels, panels, values, {k: (100, True) for k, _, _ in panels})
 
-    missed_bars(out / 'pose_pipeline', labels,
+    recall_bars(out / 'pose_pipeline', labels,
                 [[missed(truth, load_preds(folder / 'pipeline/predictions' / f'{base}{suffix}.slp')) for _, base in BACKBONES]
                  for suffix, _ in SEEDS])
 
@@ -97,18 +99,18 @@ def pose_plots(folder, out, truth, n_examples, seed):
 def detector_plots(folder, out, truth):
     labels = [label for label, _ in DETECTORS]
     summary = {(r['model'], r['subset']): r for r in read_csv(folder / 'summary.csv') if r['threshold'] == '0.2'}
-    subsets = {'crowded': 'crowded', 'others': 'isolated', 'total': 'all'}
+    subsets = {'crowded_recall': 'crowded', 'others_recall': 'isolated', 'total_recall': 'all'}
     scores = []
     for suffix, _ in SEEDS:
         seed = []
         for _, base in DETECTORS:
             m = base + suffix
-            s = {k: float(summary[m, subset]['fn_mean']) for k, subset in subsets.items()}
+            s = {k: float(summary[m, subset]['recall_pct']) for k, subset in subsets.items()}
             s['precision'] = float(summary[m, 'all']['precision_pct'])
             seed.append(s)
         scores.append(seed)
-    missed_bars(out / 'detector_detection', labels, scores)
-    missed_bars(out / 'detector_pipeline', labels,
+    recall_bars(out / 'detector_detection', labels, scores)
+    recall_bars(out / 'detector_pipeline', labels,
                 [[missed(truth, load_preds(folder / 'pipeline/predictions' / f'detector__{base}{suffix}.slp'))
                   for _, base in DETECTORS] for suffix, _ in SEEDS])
 
