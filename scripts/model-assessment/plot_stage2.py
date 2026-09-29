@@ -110,17 +110,29 @@ def draw(ax, image, skeleton, view_centre, window, colour, reference=None, ancho
         spine.set_visible(False)
 
 
-def examples_plot(per_animal, models, ground_truth, predictions_dir, n_examples, seed, output, window=180, max_error=5.0):
+def examples_plot(per_animal, models, ground_truth, predictions_dir, n_examples, seed, output, window=180, max_error=5.0,
+                  labels=None, anchors=None, disagree=False):
+    """disagree: sample only crowded larvae that some models draw correctly and others don't."""
+    labels = labels or LABELS
+    anchors = anchors or ANCHOR
     gt_labels = sio.load_slp(str(ground_truth))
     names = gt_labels.skeletons[0].node_names
     frames = {frame_key(f): f for f in gt_labels}
     preds = {m: {frame_key(f): np.stack([i.numpy() for i in f.instances])
                  for f in sio.load_slp(str(predictions_dir / f'{m}.slp'), open_videos=False)} for m in models}
+    lookup = {(r['model'], r['video'], r['frame_idx'], r['gt_index']): r for r in per_animal}
+
+    def is_correct(rec):
+        complete = all(rec[f'err_{n}'] for n in names)
+        return rec['wrong_animal'] != 'True' and complete and float(rec['mean_error_px']) <= max_error
+
     first = [r for r in per_animal if r['model'] == models[0] and r['crowded'] == 'True']
+    if disagree:
+        first = [r for r in first
+                 if len({is_correct(lookup[m, r['video'], r['frame_idx'], r['gt_index']]) for m in models}) > 1]
     rng = np.random.default_rng(seed)
     chosen = [first[i] for i in sorted(rng.choice(len(first), size=min(n_examples, len(first)), replace=False))]
-    lookup = {(r['model'], r['video'], r['frame_idx'], r['gt_index']): r for r in per_animal}
-    columns = ['Labelled'] + [LABELS.get(m, m) for m in models]
+    columns = ['Labelled'] + [labels.get(m, m) for m in models]
     fig, axes = plt.subplots(len(chosen), len(columns), figsize=(2.6 * len(columns), 2.6 * len(chosen)))
     axes = np.atleast_2d(axes)
     for row, r in enumerate(chosen):
@@ -134,10 +146,8 @@ def examples_plot(per_animal, models, ground_truth, predictions_dir, n_examples,
         draw(axes[row, 0], image, gt, centre, window, TRUTH)
         for col, m in enumerate(models, start=1):
             rec = lookup[m, r['video'], r['frame_idx'], r['gt_index']]
-            complete = all(rec[f'err_{n}'] for n in names)
-            correct = rec['wrong_animal'] != 'True' and complete and float(rec['mean_error_px']) <= max_error
-            draw(axes[row, col], image, preds[m][key][i], centre, window, CORRECT if correct else WRONG,
-                 reference=gt, anchor=gt[names.index(ANCHOR[m])])
+            draw(axes[row, col], image, preds[m][key][i], centre, window, CORRECT if is_correct(rec) else WRONG,
+                 reference=gt, anchor=gt[names.index(anchors[m])])
     for ax, name in zip(axes[0], columns):
         ax.set_title(name, fontsize=14, fontweight='bold', pad=8)
     fig.tight_layout(h_pad=0.3, w_pad=0.3)
