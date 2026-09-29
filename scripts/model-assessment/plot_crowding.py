@@ -3,7 +3,8 @@
 (the polyline through its labelled nodes). A larva counts as crowded at <= 15 px, the matching tolerance.
 
 1. crowding_distribution: cumulative distribution of that distance for the training labels and the
-   benchmark frames, and the share of crowded larvae in each training video.
+   benchmark frames, and the share of crowded larvae in each training video
+   (crowding_distribution_training: the same with the training labels alone).
 2. crowding_examples: training larvae at increasing distances from their nearest neighbour.
 Writes outputs/model_assessment/crowding/ (plots and crowding_by_video.csv).
 """
@@ -58,11 +59,13 @@ def larvae(labels):
 
 
 def distribution_plot(train, bench, names, output):
+    """bench=None plots the training labels alone."""
     colors = gradient_colors(4)
     fig, (ax, bx) = plt.subplots(1, 2, figsize=(15, 5.2), gridspec_kw={'width_ratios': [1.25, 1]})
     x = np.linspace(0, 60, 601)
     ends = []
-    for records, label, color in ((train, 'Training labels', colors[3]), (bench, 'Benchmark', colors[1])):
+    series = [(train, 'Training labels', colors[3])] + ([(bench, 'Benchmark', colors[1])] if bench is not None else [])
+    for records, label, color in series:
         d = np.array([r['dist'] for r in records])
         y = 100 * (d[:, None] <= x[None, :]).mean(axis=0)
         ax.plot(x, y, color=color, linewidth=2.5)
@@ -156,6 +159,7 @@ def main():
     bench = larvae(sio.load_slp(str(args.benchmark), open_videos=False))
     prism_style()
     per_video, order = distribution_plot(train, bench, names, args.output / 'crowding_distribution')
+    distribution_plot(train, None, names, args.output / 'crowding_distribution_training')
     with open(args.output / 'crowding_by_video.csv', 'w', newline='') as handle:
         writer = csv.writer(handle)
         writer.writerow(['video_index', 'video', 'larvae', 'crowded', 'crowded_pct'])
