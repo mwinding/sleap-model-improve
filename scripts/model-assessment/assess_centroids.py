@@ -66,27 +66,37 @@ def match_distances(distances, tolerance):
             if j < n_pred and distances[i, j] <= tolerance]
 
 
-def crowded_flags(instances, targets, crowded_px):
-    """Per animal: is its target point within crowded_px of another animal's skeleton polyline?"""
+def nearest_skeleton(instances, targets):
+    """Per animal: distance from its target point to the nearest other animal's skeleton polyline, that
+    animal's index, and the closest point on its polyline (inf / -1 / nan when there is no other animal)."""
     polylines = []
     for instance in instances:
         pts = instance.numpy()
         polylines.append(pts[np.isfinite(pts).all(axis=1)])
-    flags = np.zeros(len(targets), dtype=bool)
+    dist = np.full(len(targets), np.inf)
+    owner = np.full(len(targets), -1)
+    closest = np.full((len(targets), 2), np.nan)
     for i, point in enumerate(targets):
-        best = np.inf
         for j, pts in enumerate(polylines):
             if j == i or len(pts) == 0:
                 continue
             if len(pts) == 1:
-                best = min(best, float(np.linalg.norm(point - pts[0])))
-                continue
-            a, b = pts[:-1], pts[1:]
-            ab = b - a
-            t = np.clip(np.einsum('ij,ij->i', point - a, ab) / np.maximum(np.einsum('ij,ij->i', ab, ab), 1e-12), 0, 1)
-            best = min(best, float(np.linalg.norm(point - (a + t[:, None] * ab), axis=1).min()))
-        flags[i] = best <= crowded_px
-    return flags
+                candidates = pts[:1]
+            else:
+                a, b = pts[:-1], pts[1:]
+                ab = b - a
+                t = np.clip(np.einsum('ij,ij->i', point - a, ab) / np.maximum(np.einsum('ij,ij->i', ab, ab), 1e-12), 0, 1)
+                candidates = a + t[:, None] * ab
+            d = np.linalg.norm(point - candidates, axis=1)
+            k = int(np.argmin(d))
+            if d[k] < dist[i]:
+                dist[i], owner[i], closest[i] = d[k], j, candidates[k]
+    return dist, owner, closest
+
+
+def crowded_flags(instances, targets, crowded_px):
+    """Per animal: is its target point within crowded_px of another animal's skeleton polyline?"""
+    return nearest_skeleton(instances, targets)[0] <= crowded_px
 
 
 def write_csv(path, rows):
