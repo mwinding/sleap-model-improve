@@ -110,6 +110,9 @@ def main():
     parser.add_argument('--zoom-orders',type=int,nargs='+',default=[2,3,5])
     parser.add_argument('--zoom-size',type=int,default=480)
     parser.add_argument('--plots-only',action='store_true',help='Restyle metrics without regenerating image overlays')
+    parser.add_argument('--split',choices=['hard','crowded'],default='hard',
+                        help='Group plots: overall + hard-frame recall (hard), or crowded + other-larvae recall (crowded, '
+                             'written as <group>_crowded_vs_other.png)')
     args=parser.parse_args()
     args.baseline=args.baseline or 'centroid_fullres_body'+args.suffix
     args.candidate=args.candidate or 'centroid_body_synth_fullframe_darkoverlap_v1'+args.suffix
@@ -130,12 +133,15 @@ def main():
         labels=[textwrap.fill(label,12) for _,label in group]
         colors=gradient_colors(len(group))
         title=name.replace('cfull','reference model').replace('_',' ').capitalize()
+        panels,variant=(([('all','Overall recall'),('hard','Hard-frame recall')],'') if args.split=='hard' else
+                        ([('crowded','Crowded recall'),('isolated','Other larvae recall')],'_crowded_vs_other'))
+        subset_note=('Hard-frame recall uses the historical four-image subset.' if args.split=='hard' else
+                     'Crowded: body point within 15 px of another larva\'s skeleton; other larvae: all the rest.')
         footnote=(f"{title}. Targets: {metadata['target_protocol']}; matching ≤{metadata['tolerance_px']:g} px; "
-                  f"threshold {metadata['threshold']:g}; repeats averaged. "
-                  "Hard-frame recall uses the historical four-image subset.")
-        (out/f'{name}_caption.txt').write_text(footnote+'\n')
+                  f"threshold {metadata['threshold']:g}; repeats averaged. {subset_note}")
+        (out/f'{name}{variant}_caption.txt').write_text(footnote+'\n')
         fig,axes=plt.subplots(1,2,figsize=(max(11,len(group)*2.6),4.9),sharey=True)
-        for ax,subset,label in zip(axes,['all','hard'],['Overall recall','Hard-frame recall']):
+        for ax,(subset,label) in zip(axes,panels):
             vals=[number(lookup.get((m,subset),{'recall_pct':''}),'recall_pct') for m,_ in group]
             bars=ax.bar(x,vals,.64,color=colors,edgecolor='black',linewidth=1.7)
             ax.bar_label(bars,fmt='%.1f',fontsize=13,fontweight='bold',padding=5)
@@ -144,7 +150,9 @@ def main():
             ax.set_ylabel('Recall (%)');ax.set_title(label)
             ax.tick_params(axis='y',labelleft=True)
             ax.margins(x=.09)
-        fig.tight_layout(w_pad=2.6);save_plot(fig,out/name)
+        fig.tight_layout(w_pad=2.6);save_plot(fig,out/f'{name}{variant}')
+        if variant:
+            continue
 
         fig,ax=plt.subplots(figsize=(max(5.8,len(group)*1.3),4.9))
         vals=[number(lookup[m,'all'],'precision_pct') for m,_ in group]
