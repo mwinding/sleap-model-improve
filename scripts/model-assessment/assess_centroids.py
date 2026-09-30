@@ -66,13 +66,32 @@ def match_distances(distances, tolerance):
             if j < n_pred and distances[i, j] <= tolerance]
 
 
-def nearest_skeleton(instances, targets):
-    """Per animal: distance from its target point to the nearest other animal's skeleton polyline, that
-    animal's index, and the closest point on its polyline (inf / -1 / nan when there is no other animal)."""
+def point_to_polyline(point, pts):
+    """Distance from a point to the polyline through pts (finite rows, in node order) and the closest point on it."""
+    if len(pts) == 1:
+        candidates = pts[:1]
+    else:
+        a, b = pts[:-1], pts[1:]
+        ab = b - a
+        t = np.clip(np.einsum('ij,ij->i', point - a, ab) / np.maximum(np.einsum('ij,ij->i', ab, ab), 1e-12), 0, 1)
+        candidates = a + t[:, None] * ab
+    d = np.linalg.norm(point - candidates, axis=1)
+    k = int(np.argmin(d))
+    return d[k], candidates[k]
+
+
+def skeleton_polylines(instances):
     polylines = []
     for instance in instances:
         pts = instance.numpy()
         polylines.append(pts[np.isfinite(pts).all(axis=1)])
+    return polylines
+
+
+def nearest_skeleton(instances, targets):
+    """Per animal: distance from its target point to the nearest other animal's skeleton polyline, that
+    animal's index, and the closest point on its polyline (inf / -1 / nan when there is no other animal)."""
+    polylines = skeleton_polylines(instances)
     dist = np.full(len(targets), np.inf)
     owner = np.full(len(targets), -1)
     closest = np.full((len(targets), 2), np.nan)
@@ -80,18 +99,26 @@ def nearest_skeleton(instances, targets):
         for j, pts in enumerate(polylines):
             if j == i or len(pts) == 0:
                 continue
-            if len(pts) == 1:
-                candidates = pts[:1]
-            else:
-                a, b = pts[:-1], pts[1:]
-                ab = b - a
-                t = np.clip(np.einsum('ij,ij->i', point - a, ab) / np.maximum(np.einsum('ij,ij->i', ab, ab), 1e-12), 0, 1)
-                candidates = a + t[:, None] * ab
-            d = np.linalg.norm(point - candidates, axis=1)
-            k = int(np.argmin(d))
-            if d[k] < dist[i]:
-                dist[i], owner[i], closest[i] = d[k], j, candidates[k]
+            d, c = point_to_polyline(point, pts)
+            if d < dist[i]:
+                dist[i], owner[i], closest[i] = d, j, c
     return dist, owner, closest
+
+
+def false_positive_groups(points, instances, crowded, near_px):
+    """For predictions matched to no animal: 'crowded' or 'other' after the nearest animal (distance to its skeleton
+    polyline) when that is within near_px, else 'background' (wall, debris, unlabelled animals)."""
+    polylines = skeleton_polylines(instances)
+    groups = []
+    for point in np.asarray(points, dtype=float).reshape(-1, 2):
+        best, owner = np.inf, -1
+        for j, pts in enumerate(polylines):
+            if len(pts):
+                d, _ = point_to_polyline(point, pts)
+                if d < best:
+                    best, owner = d, j
+        groups.append('background' if best > near_px else ('crowded' if crowded[owner] else 'other'))
+    return groups
 
 
 def crowded_flags(instances, targets, crowded_px):
@@ -150,6 +177,7 @@ def load_benchmark(manifest, ground_truth, excluded, target_node='body', crowded
         if len(points) != row['instances']:
             raise ValueError(f'GT count differs from manifest for image {row["order"]}')
         user_instances = [i for i in frame.instances if not isinstance(i, sio.PredictedInstance)]
+        row['animals'] = user_instances
         row['crowded'] = crowded_flags(user_instances, row['gt'], crowded_px)
         row['included'] = row['order'] not in excluded
         row['subset'] = 'hard' if row['category'] == 'hard_early' else 'other'
@@ -297,6 +325,10 @@ def main():
                     selected = scores >= threshold
                     points, scores = points[selected], scores[selected]
                     matches = match_points(row['gt'], points, args.tolerance)
+                    used = {j for _,j,_ in matches}
+                    unmatched = [j for j in range(len(points)) if j not in used]
+                    fp_group = dict(zip(unmatched, false_positive_groups(points[unmatched], row['animals'], row['crowded'],
+                                                                        args.crowded_px) if unmatched else []))
                     result = {'model': path.stem, 'target': target, 'order': row['order'], 'video_id': row['video_id'],
                               'source_frame': row['frame_idx'], 'subset': row['subset'], 'repeat': repeat,
                               'prediction_frame': index, 'threshold': threshold,
@@ -304,11 +336,12 @@ def main():
                               'tp': len(matches), 'fp': len(points)-len(matches), 'fn': len(row['gt'])-len(matches),
                               'distance_sum': sum(m[2] for m in matches),
                               'crowded_gt': int(row['crowded'].sum()),
-                              'crowded_tp': int(sum(row['crowded'][i] for i,_,_ in matches))}
+                              'crowded_tp': int(sum(row['crowded'][i] for i,_,_ in matches)),
+                              'crowded_fp': sum(g == 'crowded' for g in fp_group.values()),
+                              'background_fp': sum(g == 'background' for g in fp_group.values())}
                     frame_rows.append(result)
                     if threshold == args.threshold:
                         matched = {i: (j, distance) for i,j,distance in matches}
-                        used = {j for _,j,_ in matches}
                         for i, xy in enumerate(row['gt']):
                             j, distance = matched.get(i, (None, None))
                             details.append({'model':path.stem, 'order':row['order'], 'repeat':repeat,
@@ -316,12 +349,14 @@ def main():
                                             'gt_index':i, 'crowded':bool(row['crowded'][i]), 'gt_x':float(xy[0]), 'gt_y':float(xy[1]),
                                             'pred_x':float(points[j,0]) if j is not None else None,
                                             'pred_y':float(points[j,1]) if j is not None else None,
-                                            'score':float(scores[j]) if j is not None else None, 'distance_px':distance})
-                        for j in set(range(len(points)))-used:
+                                            'score':float(scores[j]) if j is not None else None, 'distance_px':distance,
+                                            'fp_subset':None})
+                        for j in unmatched:
                             details.append({'model':path.stem, 'order':row['order'], 'repeat':repeat,
                                             'prediction_frame':index, 'status':'FP', 'gt_index':None, 'crowded':None,
                                             'gt_x':None, 'gt_y':None, 'pred_x':float(points[j,0]),
-                                            'pred_y':float(points[j,1]), 'score':float(scores[j]), 'distance_px':None})
+                                            'pred_y':float(points[j,1]), 'score':float(scores[j]), 'distance_px':None,
+                                            'fp_subset':fp_group[j]})
             for subset in ('all','hard','other'):
                 selected_rows = [r for r in frame_rows if subset=='all' or r['subset']==subset]
                 if not selected_rows:
@@ -333,16 +368,22 @@ def main():
                 sweep.append(result)
                 if threshold == args.threshold:
                     summary.append(result)
-            # Per-animal subsets: recall only, since a false positive belongs to no animal.
+            # Per-animal subsets. A false positive counts towards the subset of the nearest animal when it lies within
+            # crowded_px of that animal's skeleton; farther ones (background) count towards the isolated subset.
             for subset in ('crowded', 'isolated'):
                 if subset == 'crowded':
                     gt = sum(r['crowded_gt'] for r in frame_rows); tp = sum(r['crowded_tp'] for r in frame_rows)
+                    fp = sum(r['crowded_fp'] for r in frame_rows)
                 else:
                     gt = sum(r['gt_count']-r['crowded_gt'] for r in frame_rows); tp = sum(r['tp']-r['crowded_tp'] for r in frame_rows)
+                    fp = sum(r['fp']-r['crowded_fp'] for r in frame_rows)
+                recall = 100*tp/gt if gt else None
+                precision = 100*tp/(tp+fp) if tp+fp else None
                 result = {'model':path.stem, 'target': target, 'threshold':threshold, 'subset':subset,
                           'unique_images':len({r['order'] for r in frame_rows}), 'unique_gt':gt/args.repeats,
-                          'tp_mean':tp/args.repeats, 'fp_mean':None, 'fn_mean':(gt-tp)/args.repeats,
-                          'recall_pct':100*tp/gt if gt else None, 'precision_pct':None, 'f1_pct':None, 'mean_error_px':None}
+                          'tp_mean':tp/args.repeats, 'fp_mean':fp/args.repeats, 'fn_mean':(gt-tp)/args.repeats,
+                          'recall_pct':recall, 'precision_pct':precision,
+                          'f1_pct':2*recall*precision/(recall+precision) if recall and precision else None, 'mean_error_px':None}
                 sweep.append(result)
                 if threshold == args.threshold:
                     summary.append(result)
@@ -370,7 +411,9 @@ def main():
                 'matching':'maximum cardinality within tolerance, then minimum total distance',
                 'repeat_policy':'sum counts over repeats, divide counts by repeats; ratios use pooled counts',
                 'hard_subset':'manifest category hard_early; historical frame-level selection, not per-animal classification',
-                'crowded_subset':f'per-animal: target point within {args.crowded_px:g} px of another animal\'s skeleton polyline; recall only',
+                'crowded_subset':(f'per-animal: target point within {args.crowded_px:g} px of another animal\'s skeleton polyline. '
+                                  f'Precision: an unmatched prediction counts towards the subset of the nearest animal when it is '
+                                  f'within {args.crowded_px:g} px of that animal\'s skeleton; farther ones (background) count as isolated'),
                 'crowded_px':args.crowded_px,
                 'leakage_status':'not audited; benchmark order 11 (video 10 frame 41972) was a suggested synthetic source',
                 'threshold_limit':'post-filtering cannot recover predictions suppressed during inference',
@@ -378,18 +421,19 @@ def main():
     (args.output/'assessment.json').write_text(json.dumps(metadata,indent=2))
     text = ['# Centroid assessment', '', f"{len({r['order'] for r in per_image})} unique images; {args.repeats} encoded repeats per image.",
             f'Target protocol: {args.target}. Matching tolerance: {args.tolerance:g} px. Score threshold: {args.threshold:g}.', '',
-            '| Model | Recall (%) | Precision (%) | Crowded recall (%) | Isolated recall (%) | Hard-frame recall (%) | Other recall (%) | Mean error (px) |',
-            '|---|---:|---:|---:|---:|---:|---:|---:|']
+            '| Model | Recall (%) | Precision (%) | Crowded recall (%) | Crowded precision (%) | Isolated recall (%) | Isolated precision (%) | Hard-frame recall (%) | Other recall (%) | Mean error (px) |',
+            '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|']
     def display(value):
         return 'n/a' if value is None else f'{value:.2f}'
     for path in paths:
         groups={r['subset']:r for r in summary if r['model']==path.stem}
         all_row=groups['all']
         text.append('| '+path.stem+' | '+' | '.join(display(v) for v in [all_row['recall_pct'],all_row['precision_pct'],
-                    groups.get('crowded',{}).get('recall_pct'),groups.get('isolated',{}).get('recall_pct'),
+                    groups.get('crowded',{}).get('recall_pct'),groups.get('crowded',{}).get('precision_pct'),
+                    groups.get('isolated',{}).get('recall_pct'),groups.get('isolated',{}).get('precision_pct'),
                     groups.get('hard',{}).get('recall_pct'),groups.get('other',{}).get('recall_pct'),all_row['mean_error_px']])+' |')
     text.extend(['','Repeated images are not independent samples. Counts are averaged across repeats; localisation error uses matched detections only.',
-                 f'Crowded/isolated are per-animal subsets ({crowded_total} crowded of the benchmark animals): target point within {args.crowded_px:g} px of another animal\'s skeleton. Recall only; false positives are not attributable to an animal.',
+                 f'Crowded/isolated are per-animal subsets ({crowded_total} crowded of the benchmark animals): target point within {args.crowded_px:g} px of another animal\'s skeleton. Precision assigns each unmatched prediction to the nearest animal if it lies within the same distance of that animal\'s skeleton; farther ones (background) count as isolated.',
                  'The hard subset is the historical four-frame grouping, not an objective per-animal pile classification.',
                  'Historical mode uses mean-of-visible-keypoints targets for the four no-body-anchor models; body targets for the others. It reproduces the previous mixed-target comparison, not a common-target benchmark.',
                  'Training/test overlap has not been audited. Use --exclude-orders 11 for a sensitivity analysis of frame 41972.',

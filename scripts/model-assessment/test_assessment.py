@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import sleap_io as sio
 
-from assess_centroids import crowded_flags, load_predictions, match_points, metrics
+from assess_centroids import crowded_flags, false_positive_groups, load_predictions, match_points, metrics
 from merge_poses import merge_frame
 
 
@@ -75,6 +75,20 @@ class AssessmentTests(unittest.TestCase):
         self.assertEqual(crowded_flags(animals,targets,15).tolist(),[False,True,False])
         self.assertEqual(crowded_flags(animals,targets,25).tolist(),[True,True,False])
         self.assertEqual(crowded_flags(animals,targets,9).tolist(),[False,False,False])
+
+    def test_false_positives_take_the_subset_of_the_nearest_animal(self):
+        skeleton=sio.Skeleton(['a','b','c'])
+        # Animals 0 and 1 cross (both crowded); animal 2 is on its own.
+        animals=[sio.Instance.from_numpy(np.array([[0.,0.],[50.,0.],[100.,0.]]),skeleton),
+                 sio.Instance.from_numpy(np.array([[50.,-40.],[50.,5.],[50.,40.]]),skeleton),
+                 sio.Instance.from_numpy(np.array([[0.,500.],[50.,500.],[100.,500.]]),skeleton)]
+        crowded=np.array([True,True,False])
+        points=np.array([[70.,4.],      # on animal 0, 4 px from its skeleton -> crowded
+                         [30.,510.],    # 10 px from animal 2 -> other
+                         [300.,300.]])  # nowhere near anyone -> background
+        self.assertEqual(false_positive_groups(points,animals,crowded,15),['crowded','other','background'])
+        self.assertEqual(false_positive_groups(points,animals,crowded,5)[1],'background')
+        self.assertEqual(false_positive_groups(np.empty((0,2)),animals,crowded,15),[])
 
     def test_global_assignment_avoids_greedy_loss(self):
         # GT 0 can take either prediction; GT 1 can only take prediction 0.

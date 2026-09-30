@@ -133,21 +133,23 @@ def main():
         labels=[textwrap.fill(label,12) for _,label in group]
         colors=gradient_colors(len(group))
         title=name.replace('cfull','reference model').replace('_',' ').capitalize()
-        panels,variant=(([('all','Overall recall'),('hard','Hard-frame recall')],'') if args.split=='hard' else
-                        ([('crowded','Crowded recall'),('isolated','Other larvae recall')],'_crowded_vs_other'))
+        panels,variant=(([('all','recall_pct','Overall recall'),('hard','recall_pct','Hard-frame recall')],'') if args.split=='hard' else
+                        ([('crowded','recall_pct','Crowded recall'),('isolated','recall_pct','Other larvae recall'),
+                          ('crowded','precision_pct','Crowded precision'),('isolated','precision_pct','Other larvae precision')],
+                         '_crowded_vs_other'))
         subset_note=('Hard-frame recall uses the historical four-image subset.' if args.split=='hard' else
                      'Crowded: body point within 15 px of another larva\'s skeleton; other larvae: all the rest.')
         footnote=(f"{title}. Targets: {metadata['target_protocol']}; matching ≤{metadata['tolerance_px']:g} px; "
                   f"threshold {metadata['threshold']:g}; repeats averaged. {subset_note}")
         (out/f'{name}{variant}_caption.txt').write_text(footnote+'\n')
-        fig,axes=plt.subplots(1,2,figsize=(max(11,len(group)*2.6),4.9),sharey=True)
-        for ax,(subset,label) in zip(axes,panels):
-            vals=[number(lookup.get((m,subset),{'recall_pct':''}),'recall_pct') for m,_ in group]
+        fig,axes=plt.subplots(1,len(panels),figsize=(max(11,len(group)*2.6)*len(panels)/2,4.9),sharey=True)
+        for ax,(subset,key,label) in zip(axes,panels):
+            vals=[number(lookup.get((m,subset),{key:''}),key) for m,_ in group]
             bars=ax.bar(x,vals,.64,color=colors,edgecolor='black',linewidth=1.7)
             ax.bar_label(bars,fmt='%.1f',fontsize=13,fontweight='bold',padding=5)
             ax.set_xticks(x,labels,fontsize=12)
             format_percent_axis(ax)
-            ax.set_ylabel('Recall (%)');ax.set_title(label)
+            ax.set_ylabel('Recall (%)' if key=='recall_pct' else 'Precision (%)');ax.set_title(label)
             ax.tick_params(axis='y',labelleft=True)
             ax.margins(x=.09)
         fig.tight_layout(w_pad=2.6);save_plot(fig,out/f'{name}{variant}')

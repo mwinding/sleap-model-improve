@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Synthetic training data for the body centroid detector (full resolution, body anchor, sigma 2.5), seed 42 and
-seed 7 side by side: crowded / other / overall recall and precision on the held-out benchmark.
+seed 7 side by side: recall and precision for crowded and for other larvae on the held-out benchmark. A false
+positive counts towards the subset of the nearest larva when it lies within 15 px of that larva's skeleton.
 
 The crop-based sets (two-animal and parallel crops) were upscaled about 5.7x by sleap-nn's size matcher during
 training, so they test that setup rather than properly scaled crops.
@@ -27,8 +28,8 @@ ROWS = [  # label, (folder, model) seed 42, (folder, model) seed 7
     ('+ parallel crops 3k (upscaled)', ('holdout_round2', 'centroid_synth_crops_parallel3k_holdout'),
      ('seed7_singles', 'centroid_synth_crops_parallel3k_holdout_seed7')),
 ]
-PANELS = [('crowded', 'Crowded recall', 'Recall (%)'), ('isolated', 'Other larvae recall', 'Recall (%)'),
-          ('all', 'Overall recall', 'Recall (%)'), ('precision', 'Precision', 'Precision (%)')]
+PANELS = [('crowded_recall', 'Crowded recall', 'Recall (%)'), ('crowded_precision', 'Crowded precision', 'Precision (%)'),
+          ('isolated_recall', 'Other larvae recall', 'Recall (%)'), ('isolated_precision', 'Other larvae precision', 'Precision (%)')]
 
 
 def main():
@@ -42,9 +43,7 @@ def main():
         if folder not in cache:
             cache[folder] = {(r['model'], r['subset']): r for r in read_csv(A / folder / 'summary.csv') if r['threshold'] == '0.2'}
         s = cache[folder]
-        out = {k: float(s[model, k]['recall_pct']) for k in ('crowded', 'isolated', 'all')}
-        out['precision'] = float(s[model, 'all']['precision_pct'])
-        return out
+        return {f'{k}_{m}': float(s[model, k][f'{m}_pct']) for k in ('crowded', 'isolated') for m in ('recall', 'precision')}
 
     scores = [[row(*seed42) for _, seed42, _ in ROWS], [row(*seed7) for _, _, seed7 in ROWS]]
     values = {k: [[s[k] for s in seed] for seed in scores] for k, _, _ in PANELS}
