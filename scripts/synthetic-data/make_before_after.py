@@ -3,9 +3,9 @@
 its synthetic version (8 examples each, from as many source videos as possible). Full-frame set: frames with two
 added larvae. Hard-crossing set: frames with 9-10 added larvae.
 
-Both images are shown in the colours of the videos. Frames read from the ground-truth .pkg.slp with sleap-io come
-out with red and blue swapped relative to the videos, so the originals are decoded with OpenCV here, as the
-generators do; each pair is checked to differ only where larvae were added.
+Both images are shown in true colour: the originals from the ground truth, the synthetic frames from the
+channel-corrected *_truecolour.slp copies (fix_synthetic_colour.py). Each pair is checked to differ only where larvae
+were added.
 
 Writes <output>/full_frame_before_after.png and <output>/hard_crossings_before_after.png.
 """
@@ -14,7 +14,6 @@ import argparse
 import json
 from pathlib import Path
 
-import cv2
 import h5py
 import matplotlib
 matplotlib.use('Agg')
@@ -86,11 +85,11 @@ def main():
 
     with h5py.File(args.ground_truth) as gt:
         def original(video, frame):
-            return cv2.cvtColor(decode_frame(gt, int(video), int(frame)), cv2.COLOR_BGR2RGB)
+            return decode_frame(gt, int(video), int(frame))
 
         # Full-frame set (darken overlap): frames with two added larvae
         meta = json.loads((args.synthetic / 'crossings.json').read_text())
-        synthetic = sio.load_slp(str(args.synthetic / 'crossings_full-frame.slp'))
+        synthetic = sio.load_slp(str(args.synthetic / 'crossings_full-frame_truecolour.slp'))
         frames = {lf.frame_idx: lf for lf in synthetic.labeled_frames}
         pairs = []
         for c in pick([c for c in meta['crossings'] if len(c['events']) == 2], 'source_video', args.examples, rng):
@@ -101,10 +100,12 @@ def main():
 
         # Hard-crossing set: frames with the most added larvae
         meta = json.loads((args.synthetic / 'crossings_hard.json').read_text())
+        synthetic = sio.load_slp(str(args.synthetic / 'crossings_hard_truecolour.slp'))
+        frames = {lf.frame_idx: lf for lf in synthetic.labeled_frames}
         pairs = []
         for r in pick([r for r in meta['records'] if len(r['events']) >= 9], 'source_video', args.examples, rng):
             before = original(r['source_video'], r['source_frame'])
-            after = cv2.cvtColor(cv2.imread(str(args.synthetic / r['image'])), cv2.COLOR_BGR2RGB)
+            after = np.asarray(frames[r['hard_id']].image)
             check_pair(before, after, f"hard crossing {r['hard_id']}")
             pairs.append((before, after))
         figure(pairs, args.output / 'hard_crossings_before_after.png')

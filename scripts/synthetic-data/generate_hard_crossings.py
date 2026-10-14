@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Generate deliberately hard full-frame scenes with five crossing pairs."""
+"""Generate deliberately hard full-frame scenes with five crossing pairs.
+
+Images are RGB arrays throughout and converted to BGR only for cv2.imwrite (see generate_full_frame_crossings.py).
+"""
 
 from __future__ import annotations
 
@@ -12,6 +15,8 @@ import cv2
 import h5py
 import numpy as np
 import sleap_io
+
+from generate_full_frame_crossings import stored_bgr
 
 
 NODE_ORDER = ("head", "mouthhooks", "body", "tail", "spiracle")
@@ -26,7 +31,7 @@ def decode_frame(h5_file, video_id: int, source_frame: int) -> np.ndarray:
     image = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
     if image is None:
         raise ValueError(f"Could not decode video {video_id}, frame {source_frame}")
-    return image
+    return image if stored_bgr(h5_file, video_id) else np.ascontiguousarray(image[..., ::-1])
 
 
 def median_background(h5_file, video_id: int) -> np.ndarray:
@@ -38,7 +43,8 @@ def median_background(h5_file, video_id: int) -> np.ndarray:
             frames.append(image)
     if not frames:
         raise ValueError(f"Could not decode any frames for video {video_id}")
-    return np.median(np.stack(frames), axis=0).astype(np.uint8)
+    background = np.median(np.stack(frames), axis=0).astype(np.uint8)
+    return background if stored_bgr(h5_file, video_id) else np.ascontiguousarray(background[..., ::-1])
 
 
 def load_holdout(path: Path | None) -> set[tuple[int, int]]:
@@ -203,7 +209,7 @@ def main():
                                "donor_id": int(donor["donor_id"]), "center": [float(value) for value in center],
                                "relative_angle": angle})
             image_path = output_images / f"hard_{hard_id:05d}.png"
-            cv2.imwrite(str(image_path), output)
+            cv2.imwrite(str(image_path), cv2.cvtColor(output, cv2.COLOR_RGB2BGR))
             image_paths.append(str(image_path.resolve()))
             labeled_frames.append(output_instances)
             records.append({"hard_id": hard_id, "source_video": video_id, "source_frame": int(labeled.frame_idx), "background_instances_preserved": len(labeled.instances), "events": events, "image": str(image_path.relative_to(args.output))})

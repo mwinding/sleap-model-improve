@@ -4,6 +4,10 @@
 The output is intended as the first stage of the synthetic-crossing pipeline:
 real donor crops retain the imaging texture of the source data, while the
 stored local keypoints make them ready for later compositing.
+
+Crops are RGB arrays saved with cv2.imwrite unconverted, so the PNGs on disk have red and blue swapped; the
+generators read them back with cv2.imread as RGB. Existing libraries (and their reviewed SAM2 masks) use this
+convention, so keep it.
 """
 
 from __future__ import annotations
@@ -17,6 +21,8 @@ import cv2
 import h5py
 import numpy as np
 import sleap_io
+
+from generate_full_frame_crossings import stored_bgr
 
 
 NODE_ORDER = ("head", "mouthhooks", "body", "tail", "spiracle")
@@ -47,7 +53,7 @@ def decode_frame(h5_file: h5py.File, video_id: int, frame_idx: int) -> np.ndarra
     frame = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
     if frame is None:
         raise RuntimeError(f"Could not decode video {video_id}, frame {frame_idx}")
-    return frame
+    return frame if stored_bgr(h5_file, video_id) else np.ascontiguousarray(frame[..., ::-1])
 
 
 def instance_points(instance: sleap_io.Instance) -> tuple[np.ndarray, np.ndarray]:

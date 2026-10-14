@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Create full-frame synthetic crossings on top of real labeled frames."""
+"""Create full-frame synthetic crossings on top of real labeled frames.
+
+Images are RGB arrays throughout (frames from decode_frame, donor crops as the donor library stores them) and are
+converted to BGR only for cv2.imwrite. Before 2026-10-14 they were written unconverted, so every earlier synthetic set
+has red and blue swapped (fix_synthetic_colour.py writes corrected copies). The grey conversions keep OpenCV's BGR
+weights, as used for the contrast statistics stored in the donor library.
+"""
 
 from __future__ import annotations
 
@@ -18,7 +24,18 @@ import sleap_io
 NODE_ORDER = ("head", "mouthhooks", "body", "tail", "spiracle")
 
 
+def stored_bgr(h5_file: h5py.File, video_id: int) -> bool:
+    """Whether the embedded PNGs hold red in the blue slot, decided as sleap-io does: the channel_order attribute,
+    else BGR for files older than format 1.4. cv2.imdecode returns such PNGs as RGB."""
+    attrs = h5_file[f"video{video_id}/video"].attrs
+    if "channel_order" in attrs:
+        return attrs["channel_order"] == "BGR"
+    format_id = h5_file["metadata"].attrs.get("format_id") if "metadata" in h5_file else None
+    return format_id is not None and format_id < 1.4
+
+
 def decode_frame(h5_file: h5py.File, video_id: int, source_frame: int) -> np.ndarray:
+    """Embedded frame as an RGB array."""
     frame_numbers = np.asarray(h5_file[f"video{video_id}/frame_numbers"])
     matches = np.flatnonzero(frame_numbers == source_frame)
     if len(matches) != 1:
@@ -27,7 +44,7 @@ def decode_frame(h5_file: h5py.File, video_id: int, source_frame: int) -> np.nda
     frame = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
     if frame is None:
         raise ValueError(f"Could not decode video {video_id}, frame {source_frame}")
-    return frame
+    return frame if stored_bgr(h5_file, video_id) else np.ascontiguousarray(frame[..., ::-1])
 
 
 def skeleton_mask(points: np.ndarray, body_length: float, shape: tuple[int, int]) -> np.ndarray:
@@ -247,7 +264,7 @@ def main() -> None:
                     raise RuntimeError(f"Could not place variant {variant_index} for source frame {labeled_frame.frame_idx}")
 
                 image_path = output_images / f"crossing_{crossing_id:05d}.png"
-                cv2.imwrite(str(image_path), output)
+                cv2.imwrite(str(image_path), cv2.cvtColor(output, cv2.COLOR_RGB2BGR))
                 image_paths.append(str(image_path.resolve()))
                 labeled_frames.append((int(labeled_frame.frame_idx), output_instances))
                 records.append({

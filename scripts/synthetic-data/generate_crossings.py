@@ -273,7 +273,9 @@ def main() -> None:
         target_visible = np.ones(len(target_points), dtype=bool)
 
         image_path = output_images / f"crossing_{crossing_id:05d}.png"
-        cv2.imwrite(str(image_path), output)
+        # Donor crops are stored as RGB arrays (see extract_donor_library.py); before 2026-10-14 the crossings were
+        # written unconverted, with red and blue swapped.
+        cv2.imwrite(str(image_path), cv2.cvtColor(output, cv2.COLOR_RGB2BGR))
         records.append({
             "crossing_id": crossing_id,
             "target_donor": int(target["donor_id"]),

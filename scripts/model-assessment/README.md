@@ -221,3 +221,38 @@ independent of which frames were selected, unlike the frame-level hard subset.
 - `merge_poses.py` merges top-down predictions from several anchor pipelines into one set of
   skeletons (group by mean node distance, at most one skeleton per pipeline per group, fuse by
   point-score-weighted mean) and writes the number of supporting pipelines per skeleton.
+
+## Benchmark colour (2026-10-14)
+
+`comparison_frames_plain.mp4` has red and blue swapped relative to the recordings (its frames were
+written to OpenCV as RGB). Every score above was measured on it. The synthetic training sets made
+before 2026-10-14 are swapped the same way, while the real training frames and real videos reach
+sleap-nn in true colour (`scripts/sleap-training-exps/README.md`, colour fix).
+
+`decode_source` now decodes the embedded frames in true colour, as sleap-io does, and
+`verify_video` matches each video frame in either channel order and records which one in
+`frame_mapping.csv` (`colour`) and `assessment.json` (`comparison_video_colour`).
+
+`make_benchmark_video.py` rebuilds the video from the ground truth with the same encoder (mp4v,
+5 fps, 14 images x 10 repeats). The rebuilt swapped video differs from the original by 0.08 grey
+levels on average:
+
+```bash
+T=/Volumes/lab-windingm/home/shared/sleap/model-tests
+python scripts/model-assessment/make_benchmark_video.py --colour true --output $T/comparison_frames_truecolour.mp4
+python scripts/model-assessment/make_benchmark_video.py --colour swapped --output $T/comparison_frames_swappedcolour.mp4
+```
+
+`predict_benchmark.sh VIDEO OUTDIR` re-runs the detector-only predictions, the top-down pipelines
+of the backbone comparison and the two-step merge locally (reproduces the earlier pipeline files
+exactly on the original video). `plot_colour.py` compares the two videos and scores the retrained
+models:
+
+```bash
+for c in true swapped; do
+  bash scripts/model-assessment/predict_benchmark.sh $T/comparison_frames_${c}colour.mp4 outputs/model_assessment/colour/${c}colour
+  python scripts/model-assessment/assess_centroids.py --predictions-dir outputs/model_assessment/colour/${c}colour/centroids \
+      --comparison-video $T/comparison_frames_${c}colour.mp4 --output outputs/model_assessment/colour/${c}colour/assessment
+done
+python scripts/model-assessment/plot_colour.py
+```

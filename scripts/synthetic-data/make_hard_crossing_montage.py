@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Create a before/after montage for hard full-frame crossings."""
+"""Create a before/after montage for hard full-frame crossings.
+
+Pass a *_truecolour.slp copy as --hard: sets generated before 2026-10-14 have red and blue swapped.
+"""
 
 from __future__ import annotations
 
@@ -12,17 +15,11 @@ import h5py
 import numpy as np
 import sleap_io
 
+from generate_full_frame_crossings import decode_frame
+
 
 def source_frame(h5_file, video_id: int, frame_number: int) -> np.ndarray:
-    numbers = np.asarray(h5_file[f"video{video_id}/frame_numbers"])
-    matches = np.flatnonzero(numbers == frame_number)
-    if len(matches) != 1:
-        raise ValueError(f"Could not resolve video {video_id}, frame {frame_number}")
-    encoded = np.asarray(h5_file[f"video{video_id}/video"][int(matches[0])], dtype=np.uint8)
-    image = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
-    if image is None:
-        raise ValueError(f"Could not decode video {video_id}, frame {frame_number}")
-    return image
+    return cv2.cvtColor(decode_frame(h5_file, video_id, frame_number), cv2.COLOR_RGB2BGR)
 
 
 def build_parser():

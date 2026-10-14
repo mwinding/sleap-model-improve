@@ -106,3 +106,40 @@ seed 42 and seed 7 (the seed also sets the train/validation split):
 
 Seed-7 configs have the same names with `_seed7`. Mouthhooks models are assessed with
 `assess_centroids.py --target-node mouthhooks`.
+
+## Colour fix (2026-10-14)
+
+The ground-truth `.pkg.slp` frames are PNGs stored with red and blue swapped and tagged
+`channel_order=BGR`, which sleap-io honours: real training frames reach sleap-nn in true colour. The
+synthetic generators decoded them with `cv2.imdecode`, which ignores the tag, and wrote the result
+unconverted, so every synthetic set made before this date has red and blue swapped. The benchmark
+video `comparison_frames_plain.mp4` is swapped too (see `scripts/model-assessment/README.md`).
+
+`fix_synthetic_colour.py` writes channel-reversed copies with identical labels and checks that each
+frame matches its source frame away from the added larvae (99.9% of pixels for the full-frame set,
+99.4% for the hard crossings, against 9% before). The generators now write true colour; regenerating
+the full-frame set gives frames identical to the corrected copy.
+
+```bash
+O=outputs/synthetic_data_holdout
+python scripts/synthetic-data/fix_synthetic_colour.py $O/crossings_full-frame.slp --records $O/crossings.json
+python scripts/synthetic-data/fix_synthetic_colour.py $O/crossings_hard.slp --records $O/crossings_hard.json
+```
+
+Both `*_truecolour.slp` files are on the share next to the originals. Retrained on the corrected
+full-frame set, seeds 42 and 7 (`_seed7`):
+
+| Config | Backbone | Input | Training data |
+|---|---|---|---|
+| `centroid_body_synth_fullframe_truecolour_holdout` | UNet | grey | real + corrected synthetic |
+| `centroid_body_synth_fullframe_truecolour_unet_rgb_holdout` | UNet | colour | real + corrected synthetic |
+| `centroid_body_synth_fullframe_truecolour_convnext_pretrained_holdout` | ConvNeXt-tiny, ImageNet | colour | real + corrected synthetic |
+| `centroid_fullres_body_convnext_pretrained_holdout` | ConvNeXt-tiny, ImageNet | colour | real only |
+
+The pose (centered-instance) models were trained on real frames only, so they were not affected.
+
+Submit over SSH from a login shell, otherwise the job has no `ml` command:
+
+```bash
+ssh login.nemo.thecrick.org 'bash -lc "cd <repo> && sbatch scripts/sleap-training-exps/train_sleap.sh <config>"'
+```

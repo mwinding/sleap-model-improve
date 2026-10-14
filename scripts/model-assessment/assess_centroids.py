@@ -135,7 +135,18 @@ def write_csv(path, rows):
         writer.writerows(rows)
 
 
+def channel_order(handle, video_id):
+    """Channel order of the embedded PNGs, decided as sleap-io does: the dataset's channel_order attribute, else BGR
+    for files written before format 1.4."""
+    attrs = handle[f'video{video_id}/video'].attrs
+    if 'channel_order' in attrs:
+        return attrs['channel_order']
+    format_id = handle['metadata'].attrs.get('format_id') if 'metadata' in handle else None
+    return 'BGR' if format_id is not None and format_id < 1.4 else 'RGB'
+
+
 def decode_source(handle, video_id, frame_idx):
+    """Embedded source frame in true colour, in OpenCV (BGR) order."""
     group = handle[f'video{video_id}']
     matches = np.flatnonzero(group['frame_numbers'][:] == frame_idx)
     if len(matches) != 1:
@@ -143,7 +154,8 @@ def decode_source(handle, video_id, frame_idx):
     image = cv2.imdecode(np.asarray(group['video'][int(matches[0])], dtype=np.uint8), cv2.IMREAD_COLOR)
     if image is None:
         raise ValueError('Cannot decode embedded source image')
-    return image
+    # PNGs stored with channel order BGR hold red in the blue slot, so cv2.imdecode returns them as RGB.
+    return np.ascontiguousarray(image[..., ::-1]) if channel_order(handle, video_id) == 'BGR' else image
 
 
 def load_benchmark(manifest, ground_truth, excluded, target_node='body', crowded_px=15.0):
@@ -187,7 +199,8 @@ def load_benchmark(manifest, ground_truth, excluded, target_node='body', crowded
 
 
 def verify_video(video_path, gt_path, rows, repeats):
-    """Verify every encoded frame against all manifest images, not just row order."""
+    """Verify every encoded frame against all manifest images, not just row order, and record whether the video is in
+    true colour or has red and blue swapped (comparison_frames_plain.mp4 was written swapped)."""
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         raise ValueError(f'Cannot open comparison video: {video_path}')
@@ -207,15 +220,20 @@ def verify_video(video_path, gt_path, rows, repeats):
         expected_index = frame_idx // repeats
         if image.shape[:2] != shapes[expected_index]:
             raise ValueError('Comparison/source dimensions differ: coordinate scaling must be resolved')
-        distances = np.mean(np.abs(thumbnails - cv2.resize(image, size).astype(np.float32)), axis=(1, 2, 3))
-        nearest = int(np.argmin(distances))
-        if nearest != expected_index or distances[nearest] > 12:
+        thumbnail = cv2.resize(image, size).astype(np.float32)
+        distances = {colour: np.mean(np.abs(thumbnails - t), axis=(1, 2, 3))
+                     for colour, t in (('true', thumbnail), ('swapped', thumbnail[..., ::-1]))}
+        colour = min(distances, key=lambda c: distances[c].min())
+        nearest = int(np.argmin(distances[colour]))
+        if nearest != expected_index or distances[colour][nearest] > 12:
             raise ValueError(f'Comparison frame {frame_idx} does not match manifest image {expected_index + 1}')
         audit.append({'prediction_frame': frame_idx, 'order': expected_index + 1,
                       'source_video_id': rows[expected_index]['video_id'],
                       'source_frame': rows[expected_index]['frame_idx'],
-                      'thumbnail_mae': float(distances[nearest])})
+                      'colour': colour, 'thumbnail_mae': float(distances[colour][nearest])})
     cap.release()
+    if len({a['colour'] for a in audit}) != 1:
+        raise ValueError('Comparison video mixes true-colour and swapped frames')
     return audit
 
 
@@ -304,7 +322,8 @@ def main():
           f"{sum(len(r['gt']) for r in benchmark if r['included'])}", flush=True)
     mapping = verify_video(args.comparison_video, args.ground_truth, benchmark, args.repeats)
     write_csv(args.output/'frame_mapping.csv', mapping)
-    print(f'Verified {len(mapping)} comparison frames against {len(benchmark)} source images.', flush=True)
+    print(f"Verified {len(mapping)} comparison frames against {len(benchmark)} source images "
+          f"(colour: {mapping[0]['colour']}).", flush=True)
     summary, sweep, per_frame, per_image, details = [], [], [], [], []
     provenance = []
     for path in paths:
@@ -406,6 +425,7 @@ def main():
                 'ground_truth_sha256':hashlib.sha256(args.ground_truth.read_bytes()).hexdigest(),
                 'manifest_sha256':hashlib.sha256(args.manifest.read_bytes()).hexdigest(),
                 'comparison_video':str(args.comparison_video.resolve()),
+                'comparison_video_colour':mapping[0]['colour'],
                 'threshold':args.threshold,'thresholds':thresholds,'tolerance_px':args.tolerance,
                 'repeats':args.repeats, 'excluded_orders':args.exclude_orders,
                 'matching':'maximum cardinality within tolerance, then minimum total distance',

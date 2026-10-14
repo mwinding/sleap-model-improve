@@ -36,14 +36,15 @@ GRID = [('body', 'centroid_fullres_body_holdout{seed}', 'Body, real only'),
         ('mouthhooks', 'centroid_synth_fullframe_mouthhooks_holdout{seed}', 'Mouthhooks + synthetic')]
 
 
-def paired_bars(output, labels, panels, values, limits):
-    """values[panel][seed] -> list aligned with labels; limits[panel] -> (xmax, is_percent)."""
+def paired_bars(output, labels, panels, values, limits, series=None):
+    """values[panel][series] -> list aligned with labels; limits[panel] -> (xmax, is_percent). The two series are
+    the seeds unless series gives their names."""
     prism_style()
     colors = [gradient_colors(4)[1], gradient_colors(4)[3]]
     y = np.arange(len(labels))
     fig, axes = plt.subplots(1, len(panels), figsize=(5.2 * len(panels), max(4.5, len(labels) * 0.72)), sharey=True)
     for ax, (key, title, xlabel) in zip(axes, panels):
-        for s, ((_, seed_label), color) in enumerate(zip(SEEDS, colors)):
+        for s, (seed_label, color) in enumerate(zip(series or [label for _, label in SEEDS], colors)):
             v = values[key][s]
             bars = ax.barh(y + (s - 0.5) * 0.38, v, 0.36, color=color, edgecolor='black', linewidth=1.1,
                            label=seed_label, zorder=3)
