@@ -42,7 +42,9 @@ def paired_bars(output, labels, panels, values, limits, series=None):
     prism_style()
     colors = [gradient_colors(4)[1], gradient_colors(4)[3]]
     y = np.arange(len(labels))
-    fig, axes = plt.subplots(1, len(panels), figsize=(5.2 * len(panels), max(4.5, len(labels) * 0.72)), sharey=True)
+    # Every panel repeats the row labels, so widen panels with long labels to keep room for the bars
+    width = max(5.2, 2.6 + 0.092 * max(len(label) for label in labels))
+    fig, axes = plt.subplots(1, len(panels), figsize=(width * len(panels), max(4.5, len(labels) * 0.72)), sharey=True)
     for ax, (key, title, xlabel) in zip(axes, panels):
         for s, (seed_label, color) in enumerate(zip(series or [label for _, label in SEEDS], colors)):
             v = values[key][s]

@@ -57,7 +57,8 @@ PIPELINES = [('UNet real only, UNet pose', 'merge_seed{n}/topdown_body.slp'),
     (f'UNet + synth, {label} pose', f'pipeline/{SYN}_holdout__centered_instance_body_{name}_holdout{{s}}.slp')
     for label, name in (('ConvNeXt pretrained', 'convnext_pretrained'), ('ConvNeXt from scratch', 'convnext_scratch'),
                         ('Swin pretrained', 'swint_pretrained'))]
-RETRAINED_PIPELINES = [(f'{label}, UNet pose', f'pipeline/{model}{{s}}__{POSE}.slp') for label, model in RETRAINED] + [
+RETRAINED_PIPELINES = [(f'{label.replace("synthetic", "synth")}, UNet pose', f'pipeline/{model}{{s}}__{POSE}.slp')
+                       for label, model in RETRAINED] + [
     ('ConvNeXt pretrained + corrected synth, ConvNeXt pose',
      f'pipeline/{FIX}_convnext_pretrained_holdout{{s}}__centered_instance_body_convnext_pretrained_holdout.slp')]
 

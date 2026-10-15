@@ -256,3 +256,20 @@ for c in true swapped; do
 done
 python scripts/model-assessment/plot_colour.py
 ```
+
+Results (true-colour video; larvae missed, crowded / other / total, seed 42 and seed 7;
+`outputs/model_assessment/colour/colour_summary.csv` and `plots/`):
+
+- The benchmark's colour changes detector misses by at most ~1.5 crowded larvae and pipeline
+  misses by at most ~3, in both directions. The rebuilt swapped video differs from the
+  original (CUDA predictions) by the same amount, so this is noise.
+- ConvNeXt pretrained detector: corrected synthetic 27.2 / 1.1 / 28.3 and 23.1 / 1.6 / 24.7,
+  swapped synthetic 24.6 / 1.0 / 25.6 and 27.9 / 1.0 / 28.9, real only 51.2 / 6.1 / 57.3 and
+  48.6 / 4.2 / 52.8 (UNet real only 58.0 / 1.0 / 59.0 and 62.0 / 6.3 / 68.3). The pile gain
+  needs both pretraining and the synthetic data. A UNet with colour input gains nothing.
+- UNet + corrected synthetic, seed 7: ~50 false positives per pass along the hatched strip at
+  the top of the arena in benchmark image 5 (recording SV1, no training frames), precision 82.7.
+- Best pipeline (complete skeletons): ConvNeXt pretrained + corrected synthetic detector with
+  the ConvNeXt pretrained body pose model, 37.7 / 8.1 / 45.8 and 36.2 / 8.1 / 44.3, precision
+  95-96; the two-step merge gives 38.5 / 10.8 / 49.3 and 47.7 / 14.7 / 62.4, precision 93.
+  The ConvNeXt pose model only helps behind the ConvNeXt detector.
