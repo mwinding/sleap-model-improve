@@ -174,7 +174,8 @@ folder of videos and, from that folder, `sbatch --export=MODEL="sideview",JOB="p
 sleap-track_batch.sh` (p = predict, c = convert to .feather; add t for tracking). When
 `<MODEL>/active` holds sleap-nn models, both the wrapper and the shared driver hand over to
 `sleap-nn-track_batch`, so copies made before the switch keep working; they still default to
-JOB=ptc, while `sleap-nn-track_batch.sh` defaults to pc. On a 26-min recording (38,730 frames, A100) prediction takes ~2 h 10 min (5 fps; batch
+JOB=ptc, while `sleap-nn-track_batch.sh` defaults to pc. Recordings are captured at 5 Hz (the mp4s declare 25 fps, so convert frames to time with 5 Hz). On a
+test recording of 38,730 frames (~2 h 10 min, A100) prediction takes ~2 h 10 min (5 frames/s, about real time; batch
 size 4 or 16 makes no difference) and flow tracking ~4 h; the 2024 pair predicted in 19 min.
 `scripts/model-assessment/compare_production.py` compares the two pipelines on that recording
 (`outputs/model_assessment/production_test/`): 19.0 vs 17.5 complete skeletons per frame (20
