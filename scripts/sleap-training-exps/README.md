@@ -143,3 +143,39 @@ Submit over SSH from a login shell, otherwise the job has no `ml` command:
 ```bash
 ssh login.nemo.thecrick.org 'bash -lc "cd <repo> && sbatch scripts/sleap-training-exps/train_sleap.sh <config>"'
 ```
+
+## Production models (2026-10-16)
+
+The sideview production pair, in `/camp/lab/windingm/home/shared/models/sideview/active/`:
+
+| Folder | Trained from | Data |
+|---|---|---|
+| `261016_convnext.centroid` | `configs/production/centroid_body_synth_fullframe_truecolour_convnext_pretrained_all.yaml` | all 222 labelled frames + 444 full-frame synthetic (true colour) |
+| `261016_convnext.centered_instance` | `configs/production/centered_instance_body_convnext_pretrained_all.yaml` | all 222 labelled frames |
+
+Both are pretrained ConvNeXt-tiny, body anchor, sleap-nn. The synthetic set was regenerated
+from all frames with the fixed generator:
+
+```bash
+python scripts/synthetic-data/generate_full_frame_crossings.py --source data/combined_ground_truth_cleaned_visibility-fixed.pkg.slp \
+    --no-holdout --output outputs/synthetic_data_all --slp-name crossings_full-frame_truecolour.slp
+```
+
+(copied to `groundtruth/combined/synthetic_data_all/`). These models have seen the benchmark
+frames, so quote the held-out results for the recipe: complete skeletons missed, crowded / other /
+total, 37.7 / 8.1 / 45.8 and 36.2 / 8.1 / 44.3 (seeds 42 / 7), precision 95-96, against 65 / 11-19
+/ 76-84 for UNet real-only detector + UNet pose.
+
+The previous pair (SLEAP 1.x, `240515_105733.*`) is in `old/May24-16thOct2026/`.
+
+Prediction runs on NEMO through Crick-HPC-files (shared clone in
+`/camp/lab/windingm/home/shared/Crick-HPC-files`). Copy `sbatch-files/sleap-track_batch.sh` into the
+folder of videos and, from that folder, `sbatch --export=MODEL="sideview",JOB="pc"
+sleap-track_batch.sh` (p = predict, c = convert to .feather; add t for tracking). When
+`<MODEL>/active` holds sleap-nn models, both the wrapper and the shared driver hand over to
+`sleap-nn-track_batch`, so copies made before the switch keep working; they still default to
+JOB=ptc, while `sleap-nn-track_batch.sh` defaults to pc. On a 26-min recording (38,730 frames, A100) prediction takes ~2 h 10 min (5 fps; batch
+size 4 or 16 makes no difference) and flow tracking ~4 h; the 2024 pair predicted in 19 min.
+`scripts/model-assessment/compare_production.py` compares the two pipelines on that recording
+(`outputs/model_assessment/production_test/`): 19.0 vs 17.5 complete skeletons per frame (20
+larvae), all 20 complete in 36% vs 9% of frames.
